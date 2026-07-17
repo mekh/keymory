@@ -68,6 +68,7 @@ final class SwitchController {
     /// not reflect the user's choice for that app.
     private var lastRestore: (bundleID: String, verified: Bool)?
     private var isScreenLocked = false
+    private var started = false
     /// Tokens returned by addObserver(forName:) must be retained: the
     /// observation is removed as soon as its token is deallocated.
     private var observers: [NSObjectProtocol] = []
@@ -106,6 +107,10 @@ final class SwitchController {
     }
 
     func start() {
+        // Idempotent: guard against a second start() doubling the observers.
+        guard !started else { return }
+        started = true
+
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] note in
@@ -184,7 +189,6 @@ final class SwitchController {
             }
             return
         }
-        store.touch(bundleID)
         if entry.sourceID != current {
             restoreTask = Task {
                 await restore(entry.sourceID, for: bundleID)

@@ -33,30 +33,12 @@ final class MappingStoreTests: XCTestCase {
         XCTAssertEqual(store.count, 1)
     }
 
-    func testRecordSkipsWriteWhenSourceUnchanged() {
+    func testRecordSameSourceIsIdempotent() {
         store.record(sourceID: "com.apple.keylayout.US", for: "app.a")
-        let firstLastUsed = store.entry(for: "app.a")?.lastUsed
-
         store.record(sourceID: "com.apple.keylayout.US", for: "app.a")
 
-        XCTAssertEqual(store.entry(for: "app.a")?.lastUsed, firstLastUsed)
-    }
-
-    func testTouchUpdatesLastUsedOnly() {
-        store.record(sourceID: "com.apple.keylayout.US", for: "app.a")
-        let firstLastUsed = store.entry(for: "app.a")!.lastUsed
-
-        store.touch("app.a")
-
-        let entry = store.entry(for: "app.a")!
-        XCTAssertEqual(entry.sourceID, "com.apple.keylayout.US")
-        XCTAssertGreaterThanOrEqual(entry.lastUsed, firstLastUsed)
-    }
-
-    func testTouchUnknownAppIsNoOp() {
-        store.touch("unknown.app")
-
-        XCTAssertEqual(store.count, 0)
+        XCTAssertEqual(store.entry(for: "app.a")?.sourceID, "com.apple.keylayout.US")
+        XCTAssertEqual(store.count, 1)
     }
 
     func testPersistenceAcrossInstances() {

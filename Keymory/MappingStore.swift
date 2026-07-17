@@ -8,7 +8,6 @@ import Foundation
 /// A remembered input source for one application.
 struct AppEntry: Codable, Equatable {
     var sourceID: String
-    var lastUsed: Date
 }
 
 /// Persists the bundle-ID → input-source map as a single JSON blob in
@@ -37,17 +36,11 @@ final class MappingStore {
     }
 
     /// Upserts the entry; skips the write entirely when the stored source is
-    /// already the same, which absorbs duplicate change notifications.
+    /// already the same, which absorbs duplicate change notifications and means
+    /// merely activating an app (without changing layout) writes nothing.
     func record(sourceID: String, for bundleID: String) {
         guard entries[bundleID]?.sourceID != sourceID else { return }
-        entries[bundleID] = AppEntry(sourceID: sourceID, lastUsed: Date())
-        save()
-    }
-
-    func touch(_ bundleID: String) {
-        guard var entry = entries[bundleID] else { return }
-        entry.lastUsed = Date()
-        entries[bundleID] = entry
+        entries[bundleID] = AppEntry(sourceID: sourceID)
         save()
     }
 
