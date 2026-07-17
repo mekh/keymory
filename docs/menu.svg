@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 362" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="460" height="362" fill="none"/>
+
+  <!-- menu bar with active pill -->
+  <rect x="0" y="0" width="460" height="30" fill="#05070f"/>
+  <rect x="360" y="4" width="54" height="22" rx="7" fill="#26304f" stroke="#5b8cff" stroke-width="1.3"/>
+  <text x="387" y="19" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">UA</text>
+
+  <!-- dropdown panel -->
+  <g filter="url(#shadow)">
+    <rect x="150" y="34" width="296" height="310" rx="12" fill="#1e1e22" stroke="#3a3a40"/>
+  </g>
+
+  <g font-size="15" fill="#f2f2f5">
+    <!-- Enabled (checked) -->
+    <text x="176" y="66" fill="#5b8cff" font-size="14">✓</text>
+    <text x="196" y="67">Enabled</text>
+    <text x="196" y="99">Show Flag</text>
+    <text x="196" y="131">Launch at Login</text>
+    <text x="196" y="163">Default Language</text>
+    <text x="422" y="163" fill="#8b8b93" text-anchor="end">▸</text>
+    <text x="196" y="195">Open Keyboard Settings…</text>
+
+    <line x1="166" y1="216" x2="430" y2="216" stroke="#3a3a40"/>
+
+    <text x="196" y="243" fill="#8b8b93">Remembering 12 apps</text>
+    <text x="196" y="275" fill="#ff6b6b">Forget All</text>
+
+    <line x1="166" y1="296" x2="430" y2="296" stroke="#3a3a40"/>
+
+    <text x="196" y="323">Quit Keymory</text>
+  </g>
+
+  <!-- submenu preview: all labels share one left edge; checkmark sits in the gutter -->
+  <g filter="url(#shadow)">
+    <rect x="12" y="150" width="150" height="120" rx="10" fill="#1e1e22" stroke="#3a3a40"/>
+  </g>
+  <g font-size="13" fill="#f2f2f5">
+    <text x="44" y="176">Use current</text>
+    <line x1="26" y1="188" x2="148" y2="188" stroke="#3a3a40"/>
+    <text x="44" y="210">English (US)</text>
+    <text x="28" y="234" fill="#5b8cff">✓</text>
+    <text x="44" y="234">Ukrainian</text>
+    <text x="44" y="258">Hebrew</text>
+  </g>
+  <path d="M196 158 l-40 60" stroke="#5b8cff" stroke-width="1.2" stroke-dasharray="3 3" opacity="0.6"/>
+</svg>

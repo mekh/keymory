@@ -1,0 +1,10 @@
+# Xcode / build artifacts
+build/
+build.noindex/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcuserdatad
+
+# macOS
+.DS_Store

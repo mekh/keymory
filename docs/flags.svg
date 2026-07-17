@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <linearGradient id="fbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"/>
+      <stop offset="1" stop-color="#161d33"/>
+    </linearGradient>
+    <clipPath id="clipUS"><rect x="230" y="104" width="140" height="92" rx="10"/></clipPath>
+    <clipPath id="clipUA"><rect x="530" y="104" width="140" height="92" rx="10"/></clipPath>
+    <clipPath id="clipIL"><rect x="830" y="104" width="140" height="92" rx="10"/></clipPath>
+  </defs>
+
+  <rect x="1" y="1" width="1198" height="358" rx="20" fill="url(#fbg)" stroke="#2a3350" stroke-width="1.5"/>
+  <text x="600" y="60" font-size="26" font-weight="800" fill="#ffffff" text-anchor="middle">Your language, at a glance</text>
+  <text x="600" y="90" font-size="15" fill="#9aa6c4" text-anchor="middle">Show a flag instead of a code — one tap in the menu.</text>
+
+  <!-- USA (English) -->
+  <g clip-path="url(#clipUS)">
+    <rect x="230" y="104" width="140" height="92" fill="#b22234"/>
+    <g fill="#ffffff">
+      <rect x="230" y="111.1" width="140" height="7.1"/>
+      <rect x="230" y="125.2" width="140" height="7.1"/>
+      <rect x="230" y="139.4" width="140" height="7.1"/>
+      <rect x="230" y="153.5" width="140" height="7.1"/>
+      <rect x="230" y="167.7" width="140" height="7.1"/>
+      <rect x="230" y="181.8" width="140" height="7.1"/>
+    </g>
+    <rect x="230" y="104" width="60" height="50" fill="#3c3b6e"/>
+    <g fill="#ffffff">
+      <circle cx="242" cy="114" r="1.8"/><circle cx="258" cy="114" r="1.8"/><circle cx="274" cy="114" r="1.8"/>
+      <circle cx="250" cy="124" r="1.8"/><circle cx="266" cy="124" r="1.8"/><circle cx="282" cy="124" r="1.8"/>
+      <circle cx="242" cy="134" r="1.8"/><circle cx="258" cy="134" r="1.8"/><circle cx="274" cy="134" r="1.8"/>
+      <circle cx="250" cy="144" r="1.8"/><circle cx="266" cy="144" r="1.8"/><circle cx="282" cy="144" r="1.8"/>
+    </g>
+  </g>
+  <rect x="230" y="104" width="140" height="92" rx="10" fill="none" stroke="#2a3350"/>
+  <text x="300" y="238" font-size="30" font-weight="800" fill="#ffffff" text-anchor="middle">EN</text>
+  <text x="300" y="268" font-size="15" fill="#9aa6c4" text-anchor="middle">English</text>
+
+  <!-- Ukraine -->
+  <g clip-path="url(#clipUA)">
+    <rect x="530" y="104" width="140" height="46" fill="#0057b7"/>
+    <rect x="530" y="150" width="140" height="46" fill="#ffd700"/>
+  </g>
+  <rect x="530" y="104" width="140" height="92" rx="10" fill="none" stroke="#2a3350"/>
+  <text x="600" y="238" font-size="30" font-weight="800" fill="#ffffff" text-anchor="middle">UA</text>
+  <text x="600" y="268" font-size="15" fill="#9aa6c4" text-anchor="middle">Ukrainian</text>
+
+  <!-- Israel (Hebrew) -->
+  <g clip-path="url(#clipIL)">
+    <rect x="830" y="104" width="140" height="92" fill="#ffffff"/>
+    <rect x="830" y="120" width="140" height="10" fill="#0038b8"/>
+    <rect x="830" y="170" width="140" height="10" fill="#0038b8"/>
+    <g fill="none" stroke="#0038b8" stroke-width="2.4">
+      <polygon points="900,135 887,157.5 913,157.5"/>
+      <polygon points="900,165 887,142.5 913,142.5"/>
+    </g>
+  </g>
+  <rect x="830" y="104" width="140" height="92" rx="10" fill="none" stroke="#2a3350"/>
+  <text x="900" y="238" font-size="30" font-weight="800" fill="#ffffff" text-anchor="middle">HE</text>
+  <text x="900" y="268" font-size="15" fill="#9aa6c4" text-anchor="middle">Hebrew</text>
+
+  <text x="600" y="320" font-size="14" fill="#6b7699" text-anchor="middle">Keymory maps each layout's language to its flag automatically.</text>
+</svg>
