@@ -28,6 +28,17 @@ The stored data is limited to application bundle identifiers (e.g. `com.apple.fi
 
 Keymory runs inside the macOS App Sandbox and does not request Accessibility or any other sensitive permissions to provide its core functionality.
 
+### Optional: Input Monitoring (for "Track Pop-up Windows")
+
+The optional **Track Pop-up Windows** feature (off by default) follows keyboard focus into non-activating panels such as iTerm2's hotkey window, Spotlight, and Raycast. macOS exposes this information only through an input event tap, which requires the **Input Monitoring** permission.
+
+When — and only when — this option is enabled, Keymory installs a **listen-only** event tap and reads exactly one field of each keyboard/click event: the identifier of the process the event is delivered to. This is used solely to decide which application's input language to restore.
+
+- Keymory **never reads key codes or characters** — it cannot see what you type, only which app you are typing into.
+- Nothing from the event stream is stored or transmitted; the target app identifier is compared in memory and discarded.
+- Turning the option off (or quitting Keymory) removes the event tap entirely.
+- The implementation is open source and auditable: [`Keymory/EventTapClient.swift`](https://github.com/mekh/keymory/blob/main/Keymory/EventTapClient.swift).
+
 ## Children
 
 Keymory does not collect any data from anyone, including children.

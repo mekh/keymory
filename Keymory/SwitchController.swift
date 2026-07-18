@@ -13,15 +13,32 @@ final class SwitchController {
     private static let isEnabledKey = "isEnabled"
     private static let defaultSourceIDKey = "defaultSourceID"
     private static let showFlagKey = "showFlag"
+    private static let trackPopUpsKey = "trackPopUpWindows"
     private static let suppressionWindow: Duration = .seconds(1)
     private static let inputSourceChangedNotification =
         Notification.Name("com.apple.Carbon.TISNotifySelectedKeyboardInputSourceChanged")
     private static let screenLockedNotification = Notification.Name("com.apple.screenIsLocked")
     private static let screenUnlockedNotification = Notification.Name("com.apple.screenIsUnlocked")
+    /// Transient system surfaces that grab clicks or keystrokes but must never
+    /// own the layout context: reacting to them would flip the layout on every
+    /// Dock click or menu-bar interaction. Any other event-tap target — any
+    /// app's non-activating panel, present or future — is tracked.
+    private static let systemUIBundleIDs: Set<String> = [
+        "com.apple.dock",
+        "com.apple.controlcenter",
+        "com.apple.notificationcenterui",
+        "com.apple.UserNotificationCenter",
+        "com.apple.WindowManager",
+        "com.apple.systemuiserver",
+        "com.apple.loginwindow",
+        "com.apple.screencaptureui",
+        "com.apple.Siri",
+    ]
 
     var isEnabled: Bool {
         didSet {
             defaults.set(isEnabled, forKey: Self.isEnabledKey)
+            updateEventTap()
             if isEnabled {
                 seedFrontmostApp()
             }
@@ -49,8 +66,30 @@ final class SwitchController {
         didSet { defaults.set(showFlag, forKey: Self.showFlagKey) }
     }
 
+    /// Whether optional pop-up window tracking is on — non-activating panels
+    /// of any app: iTerm hotkey window, Spotlight, Raycast, 1Password Quick
+    /// Access, and whatever ships tomorrow. This is the persisted *intent*:
+    /// it may be true while Input Monitoring is still missing — the tap only
+    /// runs once the permission is granted.
+    var trackPopUps: Bool {
+        didSet {
+            defaults.set(trackPopUps, forKey: Self.trackPopUpsKey)
+            updateEventTap()
+            if !trackPopUps {
+                // Drop a possible pop-up context so later source changes are
+                // attributed to the real frontmost app again.
+                seedFrontmostApp()
+            }
+        }
+    }
+
+    enum PopUpToggleOutcome {
+        case enabled, disabled, permissionRequired
+    }
+
     private let store: MappingStore
     private let inputSources: InputSourceClient
+    private let eventTap: EventTapClient?
     private let defaults: UserDefaults
     private let ownBundleID: String?
     private let frontmostProvider: () -> String?
@@ -76,6 +115,7 @@ final class SwitchController {
     init(
         store: MappingStore,
         inputSources: InputSourceClient,
+        eventTap: EventTapClient? = nil,
         defaults: UserDefaults = .standard,
         ownBundleID: String? = Bundle.main.bundleIdentifier,
         frontmostProvider: @escaping () -> String? = {
@@ -84,6 +124,7 @@ final class SwitchController {
     ) {
         self.store = store
         self.inputSources = inputSources
+        self.eventTap = eventTap
         self.defaults = defaults
         self.ownBundleID = ownBundleID
         self.frontmostProvider = frontmostProvider
@@ -93,6 +134,7 @@ final class SwitchController {
             : defaults.bool(forKey: Self.isEnabledKey)
         self.defaultSourceID = defaults.string(forKey: Self.defaultSourceIDKey)
         self.showFlag = defaults.bool(forKey: Self.showFlagKey)
+        self.trackPopUps = defaults.bool(forKey: Self.trackPopUpsKey)
     }
 
     /// Enabled, select-capable keyboard input sources for the default-language
@@ -148,6 +190,49 @@ final class SwitchController {
         // Track it, but neither restore (no surprise layout flip at launch)
         // nor record (must not overwrite a stored preference).
         seedFrontmostApp()
+
+        updateEventTap()
+    }
+
+    /// Flips pop-up tracking. `.permissionRequired` means the intent was
+    /// stored and the system prompt was requested, but Input Monitoring is
+    /// not granted yet — the caller should route the user to System Settings.
+    func toggleTrackPopUps() -> PopUpToggleOutcome {
+        guard !trackPopUps else {
+            trackPopUps = false
+            return .disabled
+        }
+        trackPopUps = true
+        guard let eventTap, !eventTap.permissionGranted() else { return .enabled }
+        eventTap.requestPermission()
+        return .permissionRequired
+    }
+
+    /// Whether the tap is actually delivering — false while the permission
+    /// is still missing, which the menu renders as a mixed state.
+    var popUpTrackingActive: Bool {
+        eventTap?.isRunning ?? false
+    }
+
+    /// Re-evaluates whether the tap should run. Safe to call any time; used
+    /// when the menu opens to pick up a permission granted in Settings.
+    func refreshPopUpTracking() {
+        updateEventTap()
+    }
+
+    /// An input event was routed to `bundleID` (the annotated target of a
+    /// keyboard/click/flags event). Any target can take the tracked context —
+    /// that is what makes arbitrary apps' pop-ups work with no per-app list —
+    /// except transient system surfaces, which are ignored to avoid layout
+    /// churn. Leaving a pop-up needs no special case: the next event simply
+    /// targets the app underneath.
+    func handleEventTarget(bundleID: String?) {
+        guard isEnabled, trackPopUps, !isScreenLocked else { return }
+        guard let bundleID, bundleID != ownBundleID, bundleID != frontmostBundleID else {
+            return
+        }
+        guard !Self.systemUIBundleIDs.contains(bundleID) else { return }
+        handleActivation(bundleID: bundleID)
     }
 
     func handleActivation(bundleID: String?) {
@@ -216,10 +301,22 @@ final class SwitchController {
 
     func handleScreenLockChange(locked: Bool) {
         isScreenLocked = locked
+        updateEventTap()
         if !locked {
             // The login window may have switched the source; re-baseline so
             // its changes are not attributed to the frontmost app.
             seedFrontmostApp()
+        }
+    }
+
+    private func updateEventTap() {
+        guard let eventTap else { return }
+        if isEnabled && trackPopUps && !isScreenLocked && eventTap.permissionGranted() {
+            _ = eventTap.start { [weak self] bundleID in
+                self?.handleEventTarget(bundleID: bundleID)
+            }
+        } else {
+            eventTap.stop()
         }
     }
 

@@ -35,7 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sourceChangeObserver: NSObjectProtocol?
     private let controller = SwitchController(
         store: MappingStore(defaults: .standard),
-        inputSources: SystemInputSourceClient()
+        inputSources: SystemInputSourceClient(),
+        eventTap: SystemEventTapClient()
     )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -125,6 +126,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.isEnabled.toggle()
     }
 
+    @objc private func toggleTrackPopUps() {
+        if controller.toggleTrackPopUps() == .permissionRequired {
+            // The system prompt (when TCC still shows one) points to the same
+            // pane; opening it directly also covers re-enabling after an
+            // earlier denial, when macOS no longer prompts.
+            openInputMonitoringSettings()
+        }
+    }
+
+    private func openInputMonitoringSettings() {
+        guard let url = URL(string:
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+        ) else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
     @objc private func openKeyboardSettings() {
         // Same destination as the system input menu's "Open Keyboard Settings…"
         // — the Keyboard pane, whose Input Sources section holds the Edit sheet.
@@ -178,6 +197,18 @@ extension AppDelegate: NSMenuDelegate {
         enabled.target = self
         enabled.state = controller.isEnabled ? .on : .off
         menu.addItem(enabled)
+
+        // Re-check on every menu open so a permission granted in System
+        // Settings since the last look starts the tap without a relaunch
+        // attempt. .mixed = enabled but still waiting for Input Monitoring.
+        controller.refreshPopUpTracking()
+        let trackPopUps = NSMenuItem(title: "Track Pop-up Windows",
+                                     action: #selector(toggleTrackPopUps), keyEquivalent: "")
+        trackPopUps.target = self
+        trackPopUps.state = controller.trackPopUps
+            ? (controller.popUpTrackingActive ? .on : .mixed)
+            : .off
+        menu.addItem(trackPopUps)
 
         let showFlag = NSMenuItem(title: "Show Flag",
                                   action: #selector(toggleShowFlag), keyEquivalent: "")

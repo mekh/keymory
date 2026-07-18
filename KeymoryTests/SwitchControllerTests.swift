@@ -34,12 +34,42 @@ final class MockInputSourceClient: InputSourceClient {
 }
 
 @MainActor
+final class MockEventTapClient: EventTapClient {
+    var granted = true
+    private(set) var requestCount = 0
+    private var onEvent: ((String?) -> Void)?
+
+    var isRunning: Bool { onEvent != nil }
+
+    func permissionGranted() -> Bool { granted }
+
+    @discardableResult
+    func requestPermission() -> Bool {
+        requestCount += 1
+        return false
+    }
+
+    func start(onEvent: @escaping (String?) -> Void) -> Bool {
+        guard granted else { return false }
+        self.onEvent = onEvent
+        return true
+    }
+
+    func stop() { onEvent = nil }
+
+    /// Simulates an input event routed to the given bundle id.
+    func send(_ bundleID: String?) { onEvent?(bundleID) }
+}
+
+@MainActor
 final class SwitchControllerTests: XCTestCase {
     private static let ownBundleID = "test.keymory"
+    private static let iterm = "com.googlecode.iterm2"
 
     private var defaults: UserDefaults!
     private var store: MappingStore!
     private var mock: MockInputSourceClient!
+    private var tap: MockEventTapClient!
     private var controller: SwitchController!
     private var frontmostForSeed: String?
 
@@ -48,9 +78,11 @@ final class SwitchControllerTests: XCTestCase {
         defaults = UserDefaults(suiteName: "test-\(UUID().uuidString)")
         store = MappingStore(defaults: defaults)
         mock = MockInputSourceClient()
+        tap = MockEventTapClient()
         controller = SwitchController(
             store: store,
             inputSources: mock,
+            eventTap: tap,
             defaults: defaults,
             ownBundleID: Self.ownBundleID,
             frontmostProvider: { [weak self] in self?.frontmostForSeed }
@@ -350,5 +382,171 @@ final class SwitchControllerTests: XCTestCase {
 
         XCTAssertEqual(store.count, 0)
         XCTAssertEqual(controller.mappingCount, 0)
+    }
+
+    // MARK: - Pop-up window tracking
+
+    func testToggleWithPermissionStartsTap() {
+        XCTAssertEqual(controller.toggleTrackPopUps(), .enabled)
+
+        XCTAssertTrue(controller.trackPopUps)
+        XCTAssertTrue(tap.isRunning)
+        XCTAssertTrue(controller.popUpTrackingActive)
+    }
+
+    func testToggleWithoutPermissionStoresIntentAndRequests() {
+        tap.granted = false
+
+        XCTAssertEqual(controller.toggleTrackPopUps(), .permissionRequired)
+
+        XCTAssertTrue(controller.trackPopUps)
+        XCTAssertEqual(tap.requestCount, 1)
+        XCTAssertFalse(tap.isRunning)
+        XCTAssertFalse(controller.popUpTrackingActive)
+    }
+
+    func testRefreshStartsTapOncePermissionAppears() {
+        tap.granted = false
+        _ = controller.toggleTrackPopUps()
+
+        tap.granted = true
+        controller.refreshPopUpTracking()
+
+        XCTAssertTrue(tap.isRunning)
+    }
+
+    func testToggleOffStopsTapAndReattributesToFrontmost() {
+        frontmostForSeed = "app.front"
+        mock.currentID = "en"
+        controller.handleActivation(bundleID: "app.front")
+        _ = controller.toggleTrackPopUps()
+        controller.handleEventTarget(bundleID: Self.iterm)
+
+        XCTAssertEqual(controller.toggleTrackPopUps(), .disabled)
+
+        XCTAssertFalse(tap.isRunning)
+        // Context must be re-seeded: later changes belong to the real
+        // frontmost app, not the pop-up.
+        mock.currentID = "uk"
+        controller.handleSourceChange()
+        XCTAssertEqual(store.entry(for: "app.front")?.sourceID, "uk")
+        XCTAssertEqual(store.entry(for: Self.iterm)?.sourceID, "en")
+    }
+
+    func testPopUpEventRestoresRememberedSourceAndSnapshotsOutgoing() async {
+        store.record(sourceID: "uk", for: Self.iterm)
+        mock.currentID = "en"
+        controller.handleActivation(bundleID: "app.a")
+        _ = controller.toggleTrackPopUps()
+
+        tap.send(Self.iterm)
+        await awaitRestore()
+
+        XCTAssertEqual(mock.currentID, "uk")
+        XCTAssertEqual(store.entry(for: "app.a")?.sourceID, "en")
+    }
+
+    func testPopUpDismissRestoresFrontmostAppSource() async {
+        frontmostForSeed = "app.a"
+        store.record(sourceID: "uk", for: Self.iterm)
+        mock.currentID = "en"
+        controller.handleActivation(bundleID: "app.a")
+        _ = controller.toggleTrackPopUps()
+        tap.send(Self.iterm)
+        await awaitRestore()
+
+        // Panel dismissed: the next event targets the still-frontmost app.
+        tap.send("app.a")
+        await awaitRestore()
+
+        XCTAssertEqual(mock.currentID, "en")
+        XCTAssertEqual(store.entry(for: Self.iterm)?.sourceID, "uk")
+    }
+
+    func testSourceChangeDuringPopUpAttributedToPopUp() {
+        mock.currentID = "en"
+        controller.handleActivation(bundleID: "app.a")
+        _ = controller.toggleTrackPopUps()
+        tap.send("com.apple.Spotlight")
+
+        mock.currentID = "uk"
+        controller.handleSourceChange()
+
+        XCTAssertEqual(store.entry(for: "com.apple.Spotlight")?.sourceID, "uk")
+        XCTAssertEqual(store.entry(for: "app.a")?.sourceID, "en")
+    }
+
+    func testSystemUITargetsAreIgnored() {
+        frontmostForSeed = "app.a"
+        mock.currentID = "en"
+        controller.handleActivation(bundleID: "app.a")
+        _ = controller.toggleTrackPopUps()
+
+        // Dock is a transient system surface — never a layout context.
+        tap.send("com.apple.dock")
+
+        XCTAssertNil(store.entry(for: "com.apple.dock"))
+        XCTAssertNil(controller.restoreTask)
+        mock.currentID = "uk"
+        controller.handleSourceChange()
+        XCTAssertEqual(store.entry(for: "app.a")?.sourceID, "uk")
+    }
+
+    func testAnyAppPanelIsTrackedWithoutAllowlisting() async {
+        store.record(sourceID: "uk", for: "com.1password.1password")
+        mock.currentID = "en"
+        controller.handleActivation(bundleID: "app.a")
+        _ = controller.toggleTrackPopUps()
+
+        tap.send("com.1password.1password")
+        await awaitRestore()
+
+        XCTAssertEqual(mock.currentID, "uk")
+        XCTAssertEqual(store.entry(for: "app.a")?.sourceID, "en")
+    }
+
+    func testEventsIgnoredWhileTrackingDisabled() {
+        mock.currentID = "en"
+        controller.handleActivation(bundleID: "app.a")
+
+        controller.handleEventTarget(bundleID: Self.iterm)
+
+        XCTAssertNil(store.entry(for: Self.iterm))
+    }
+
+    func testDisablingControllerStopsTap() {
+        _ = controller.toggleTrackPopUps()
+        XCTAssertTrue(tap.isRunning)
+
+        controller.isEnabled = false
+        XCTAssertFalse(tap.isRunning)
+
+        controller.isEnabled = true
+        XCTAssertTrue(tap.isRunning)
+    }
+
+    func testScreenLockSuspendsTap() {
+        _ = controller.toggleTrackPopUps()
+
+        controller.handleScreenLockChange(locked: true)
+        XCTAssertFalse(tap.isRunning)
+
+        controller.handleScreenLockChange(locked: false)
+        XCTAssertTrue(tap.isRunning)
+    }
+
+    func testTrackPopUpsPersistsAcrossInstances() {
+        _ = controller.toggleTrackPopUps()
+
+        let reloaded = SwitchController(
+            store: store,
+            inputSources: mock,
+            eventTap: tap,
+            defaults: defaults,
+            ownBundleID: Self.ownBundleID,
+            frontmostProvider: { nil }
+        )
+
+        XCTAssertTrue(reloaded.trackPopUps)
     }
 }
