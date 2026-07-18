@@ -141,6 +141,10 @@ cp -R build.noindex/Build/Products/Release/Keymory.app ~/Applications/
 `DEVELOPMENT_TEAM = RT7WS95PK2` must be set on **all three targets**: with it only on
 the app target, the CLI test run fails to load `KeymoryTests.xctest` ("mapping process
 and mapped file have different Team IDs").
+`ENABLE_HARDENED_RUNTIME = YES` is on and needs **no changes for the event tap**: no
+hardened-runtime or sandbox entitlement exists for Input Monitoring/CGEventTap (it is
+TCC-gated only), and no Info.plist usage-description key applies — verified live with
+the shipped feature running under Hardened Runtime + App Sandbox simultaneously.
 
 ## Critical technical facts (verified empirically)
 
