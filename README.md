@@ -131,7 +131,7 @@ Keymory focuses on Latin and Cyrillic layouts today. **If your language or input
 
 ## 📄 License
 
-© 2026 Oleksandr. Add your preferred license (MIT recommended) as a `LICENSE` file.
+Released under the [MIT License](LICENSE). © 2026 Oleksandr Miekh.
 
 ---
 
