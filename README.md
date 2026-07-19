@@ -13,8 +13,8 @@
   <img alt="Swift" src="https://img.shields.io/badge/Swift-5-F05138?logo=swift&logoColor=white">
   <img alt="UI" src="https://img.shields.io/badge/UI-AppKit%20menu%20bar-5b8cff">
   <img alt="Privacy" src="https://img.shields.io/badge/data-100%25%20on%20device-2ea043">
-  <img alt="Permissions" src="https://img.shields.io/badge/Accessibility-not%20required-2ea043">
-  <img alt="Sandbox" src="https://img.shields.io/badge/App%20Sandbox-enabled-2ea043">
+  <img alt="Permissions" src="https://img.shields.io/badge/Accessibility-optional-e0a800">
+  <img alt="Sandbox" src="https://img.shields.io/badge/App%20Sandbox-off%20(direct%20build)-e0a800">
 </p>
 
 ---
@@ -51,7 +51,8 @@ Set it once by just *using* your Mac the way you already do. From then on, the r
 - 🏳️ **A gorgeous live indicator.** See your current language right in the menu bar — as a **flag** (🇺🇸 🇺🇦 🇮🇱) or a crisp **code** (EN / UA / HE). One click to switch styles.
 - 🌍 **Set a default language for new apps.** Want every brand-new app to start in English? Pick a default. Prefer it to adopt whatever's active? That's the default default.
 - ⚡ **Invisible & featherweight.** A tiny menu-bar agent. No Dock icon, no window, no clutter, no lag.
-- 🔒 **Private & contained.** Everything stays on your Mac — no network, no analytics, no account, and **no Accessibility permission required.** Runs inside the **macOS App Sandbox**, so it's locked down to only what it needs.
+- 🪟 **Follows pop-up windows (this build).** iTerm's hotkey terminal, Spotlight, Raycast, 1Password Quick Access — windows that appear without switching apps get their own remembered language too, switched **before you type**. Optional; asks for Accessibility. See below.
+- 🔒 **Private & on-device.** Everything stays on your Mac — no network, no analytics, no account. The core needs no permissions; the optional **Track All Windows** mode uses Accessibility and even then reads only *which app* has focus, never your keystrokes.
 - 🔁 **Launch at login.** Turn it on once and forget Keymory exists — which is exactly the point.
 - 🛟 **Bulletproof.** Verifies each switch and retries if the system stalls. Remembered a layout you later removed? Keymory quietly leaves your current one alone instead of breaking.
 
@@ -68,6 +69,7 @@ Set it once by just *using* your Mac the way you already do. From then on, the r
 | Menu item | What it does |
 | --- | --- |
 | **Enabled** | Master switch for automatic switching. |
+| **Track All Windows** | Follow keyboard focus into pop-up windows that never activate their app (iTerm hotkey terminal, Spotlight, Raycast, …) and switch the language before you type. Optional; asks for Accessibility. |
 | **Show Flag** | Toggle the menu-bar indicator between a flag and a language code. |
 | **Launch at Login** | Start Keymory automatically when you log in. |
 | **Default Language ▸** | Language for apps Keymory hasn't seen yet (or "Use current input source"). |
@@ -75,6 +77,30 @@ Set it once by just *using* your Mac the way you already do. From then on, the r
 | **Remembering N apps** | How many apps Keymory currently knows. |
 | **Forget All** | Wipe the memory and start fresh. |
 | **Quit Keymory** | Quit the app. |
+
+## 🪟 Track All Windows: pop-ups that never switch apps (this build)
+
+Some windows take your keyboard without ever *activating* their app: iTerm2's hotkey
+drop-down terminal, Spotlight, Raycast, 1Password's Quick Access. macOS fires no
+app-activation event for them, so an ordinary per-app switcher can't see them.
+
+This build can. Turn on **Track All Windows** and Keymory watches where the keyboard focus
+actually is and switches the language **before you type the first letter** — no extra
+click, no lost first character. It works for **any** app's pop-up window, present or
+future; there's no list to maintain.
+
+This is the one feature that needs a permission — **Accessibility** (System Settings ▸
+Privacy & Security ▸ Accessibility). The honest fine print:
+
+- Keymory reads only **which application currently has keyboard focus** — never your
+  keystrokes and never window contents.
+- It uses that solely to pick which app's remembered language to restore.
+- Turn the option off and Keymory stops watching entirely.
+- Because it needs Accessibility, this build is **not sandboxed** and ships as a direct
+  download, not on the Mac App Store. (The App Store build stays sandboxed and simply
+  doesn't include this feature.)
+- It's open source — the only file involved is
+  [`Keymory/AXActivationDetector.swift`](Keymory/AXActivationDetector.swift).
 
 ## 📦 Install
 
@@ -95,7 +121,9 @@ open /Applications/Keymory.app
 
 Or just open `Keymory.xcodeproj` in Xcode and press **Run**.
 
-On first launch, look for the language indicator in your menu bar and enable **Launch at Login**. That's it — go back to work and let Keymory disappear into the background.
+On first launch, look for the language indicator in your menu bar and enable **Launch at Login**. That's it — go back to work and let Keymory disappear into the background. To follow pop-up windows too, open the menu and turn on **Track All Windows**, then grant Accessibility when prompted.
+
+> **This is the non-sandboxed build.** It exists specifically to switch the language for pop-up windows before you type, which needs the Accessibility API — something the App Sandbox forbids. If you don't need that, the sandboxed App Store build is the safer, lighter choice.
 
 > **A note on menu bars with a notch:** if your menu bar is crowded, macOS may tuck new items behind the camera notch. Hold **⌘** and drag Keymory's indicator to a spot you can see — it'll stay put.
 
@@ -110,15 +138,15 @@ Keymory listens for app-activation events and, when you switch apps, restores th
 - Reads/writes input sources with `TISCopyCurrentKeyboardInputSource` / `TISSelectInputSource`.
 - Tracks the frontmost app via `NSWorkspace` activation notifications.
 - Persists to `UserDefaults`; no files, no database, no cloud.
-- No Accessibility permission needed for the core experience.
-- Runs under the **App Sandbox** — TIS switching, `NSWorkspace` activation and the input-source-change notification all work sandboxed, so Keymory stays contained by macOS.
+- The core needs no permissions. The optional **Track All Windows** mode uses the Accessibility API to see which app holds keyboard focus — including non-activating pop-ups — and switch before you type.
+- This build runs **outside** the App Sandbox, which is required for the Accessibility API to observe other apps. The App Store build is sandboxed and omits Track All Windows.
 
 ## 🤏 Good to know
 
 Keymory is honest about the edges:
 
 - A few apps that manage their own text input (some Electron/terminal/Java apps) may occasionally ignore a system-level switch. Rare, and on the roadmap.
-- Non-activating overlays like Spotlight/Raycast don't report focus changes, so a language change made there is attributed to the previous app. It self-corrects the next time you actually type.
+- Non-activating pop-ups (iTerm hotkey terminal, Spotlight, Raycast, …) are handled by **Track All Windows** — the language switches before you type. With that option off, a change made in such a window is attributed to the previous app and self-corrects next time you type.
 - Complex IME languages (Chinese/Japanese/Korean) are not the focus of this version — Latin/Cyrillic layouts are first-class today.
 
 ## 🤝 Contributing

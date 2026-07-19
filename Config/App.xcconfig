@@ -19,4 +19,4 @@ DEVELOPMENT_TEAM = RT7WS95PK2
 
 // App Sandbox. ON for the App Store builds (shared-core, pop-up tracking).
 // The non-sandboxed personal build overrides this to NO.
-ENABLE_APP_SANDBOX = YES
+ENABLE_APP_SANDBOX = NO

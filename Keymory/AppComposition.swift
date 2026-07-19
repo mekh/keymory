@@ -8,24 +8,26 @@ import Foundation
 /// Composition root — the single per-branch-divergent source file. It selects
 /// the concrete input-source client and activation detector for this build
 /// variant. Keeping the choice here is what lets `SwitchController`,
-/// `KeymoryApp`, and the shared tests stay byte-identical across the three
-/// branches (App Store, pop-up tracking, non-sandboxed personal), so a
-/// business-logic fix propagates by overwriting those files with zero conflicts.
+/// `KeymoryApp`, and the shared tests stay byte-identical across the branches
+/// (App Store, pop-up tracking, non-sandboxed personal), so a business-logic
+/// fix propagates by overwriting those files with zero conflicts.
 ///
-/// This is the App Store / `main` variant: no supplementary detector (detection
-/// is `NSWorkspace` activation only), and the default TIS-backed input client.
+/// This is the non-sandboxed personal variant: an Accessibility-based detector
+/// that switches the layout for non-activating panels *before the first
+/// keystroke*, plus the default TIS input client. App Sandbox is OFF on this
+/// branch (see `Config/App.xcconfig`); that is what lets the Accessibility API
+/// observe other processes at all.
 enum AppComposition {
     /// Keyboard input-source backend. The system Carbon/TIS client on this
-    /// build; the personal build may substitute a more aggressive client to
-    /// make switches stick in terminals.
+    /// build.
     static func makeInputSourceClient() -> InputSourceClient {
         SystemInputSourceClient()
     }
 
     /// Supplementary activation detector layered on top of `NSWorkspace`
-    /// activation. `nil` here → sandbox-only detection, no extra permission,
-    /// and the "Track…" menu item stays hidden.
+    /// activation: Accessibility focus observation that fires before the first
+    /// keystroke once the Accessibility permission is granted.
     static func makeActivationDetector() -> ActivationDetector? {
-        nil
+        AXActivationDetector()
     }
 }

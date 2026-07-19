@@ -9,7 +9,9 @@ A remembered source that is no longer installed/enabled → keep the current sou
 silently. Memory persists indefinitely (no eviction). Every app is auto-remembered.
 
 - Repo: `github.com/mekh/keymory` · Bundle ID: `toxic0der.Keymory`
-- Distribution: free, non-tracking, App Store (Utilities). Also runnable via direct build.
+- Distribution: free, non-tracking, App Store (Utilities). **This `no-sandbox` branch is
+  a non-sandboxed direct-build variant, not an App Store build** (App Sandbox forbids the
+  Accessibility API it relies on).
 
 ## Branches / build variants
 
@@ -19,12 +21,15 @@ edges — *how an app activation is detected*, and whether the app is sandboxed:
 - **`shared-core`** — the App Store base / `main` candidate. Detection is `NSWorkspace`
   app-activation only; App Sandbox ON; no extra permission. Injects **no** activation
   detector, so the extra-window-tracking apparatus is dormant and the "Track…" menu item
-  is hidden. **← this branch**; see "This branch" below.
+  is hidden.
 - **`popup-window-tracking`** — App Store + optional pop-up tracking via a listen-only
   `CGEventTap` (Input Monitoring). Adds `Keymory/SystemEventTapClient.swift`.
-- **`personal`** (planned) — non-sandboxed build that switches proactively in any window
-  (iTerm, Spotlight, …) via the Accessibility API. Would inject an AX detector, and may
-  inject a more aggressive `InputSourceClient` for terminal stickiness.
+- **`no-sandbox`** — non-sandboxed build that switches proactively in any window (iTerm
+  hotkey window, Spotlight, Raycast, …) via the Accessibility API — the layout changes
+  **before the first keystroke**, with no extra click. Injects
+  `Keymory/AXActivationDetector.swift`; App Sandbox OFF. **← this branch**; see "This
+  branch" below. (This is the variant older docs on other branches call `personal`; it was
+  renamed `no-sandbox`.)
 - **`main`** — left untouched for now; `shared-core` is its eventual replacement.
 
 **Shared core — byte-identical across all branches:** `SwitchController.swift`,
@@ -44,8 +49,12 @@ git checkout <source-branch> -- \
 Because those files are identical, the overwrite cannot conflict. **Per-branch files**
 (never cross-merged): `Keymory/AppComposition.swift` (the composition root — present on
 every branch, different contents) and each branch's detector implementation
-(`SystemEventTapClient.swift` on popup; an AX detector on personal; **none** here).
-Docs (`CLAUDE.md`, `README.md`, `PRIVACY.md`) are also per-branch.
+(`SystemEventTapClient.swift` on popup; `AXActivationDetector.swift` here on no-sandbox;
+**none** on shared-core). Docs (`CLAUDE.md`, `README.md`, `PRIVACY.md`) are also per-branch.
+**Caveat on this branch:** `Config/App.xcconfig` is shared *except its single
+`ENABLE_APP_SANDBOX` line*, which is `NO` here and `YES` everywhere else. When propagating
+a version bump by overwrite, re-set that one flag to `NO` afterwards; the rest of the file
+stays byte-identical.
 
 ## Naming / layout
 
@@ -95,8 +104,8 @@ bundle id — no trace of the old name should reappear).
   CJKV / terminal-stickiness remediation would plug in (via a per-branch
   `InputSourceClient`). `start()` idempotent (`started` guard), seeds the frontmost app at
   launch **without** restoring or recording, handles screen lock/unlock. **Extra-window
-  tracking apparatus (dormant when no detector is injected — as on this branch):**
-  `trackExtraWindows` is the persisted *intent* (UserDefaults key kept as
+  tracking apparatus (active on this branch; dormant only when no detector is injected,
+  e.g. shared-core):** `trackExtraWindows` is the persisted *intent* (UserDefaults key kept as
   `"trackPopUpWindows"` for compat; may be true while the permission is missing);
   `handleDetectedActivation` accepts **any** detector target as the new context —
   arbitrary apps' panels work with no per-app list, incl. future apps — except transient
@@ -109,8 +118,20 @@ bundle id — no trace of the old name should reappear).
 - `Keymory/ActivationDetector.swift` — the mechanism-neutral **seam**: a `@MainActor`
   protocol (`isActive`, `menuTitle`, `settingsURL`, `permissionGranted`,
   `requestPermission`, `start(onActivation:)`, `stop`). **Foundation-only** imports, so a
-  build that injects no detector (this one) links no Carbon/CGEvent/Accessibility code.
-  The concrete detector is per-branch (see Branches).
+  build that injects no detector (e.g. shared-core) links no Carbon/CGEvent/Accessibility
+  code. The concrete detector is per-branch (see Branches).
+- `Keymory/AXActivationDetector.swift` — **this branch's detector**; the only file here
+  that touches the Accessibility API. Polls the system-wide element's
+  `kAXFocusedApplicationAttribute` (120 ms) — the process that currently owns keyboard
+  focus, including a non-activating panel whose owner never becomes `frontmostApplication`
+  — and reports the resolved bundle id when it changes, so the switch lands **before the
+  first keystroke**. A poll (not per-app `AXObserver`s) is deliberate: the system-wide
+  focused-app read is the reliable signal and is cheap (it hits the AX runtime, not the
+  target app, so it can't hang on an unresponsive app), whereas per-app focus
+  notifications are flaky for non-activating panels. `AXUIElementSetMessagingTimeout` 0.25 s
+  guards the read. Permission via `AXIsProcessTrusted` / `AXIsProcessTrustedWithOptions`;
+  the grant is live (no relaunch) and, because AX only reads *which* app has focus, never
+  keystrokes/content. Reads no key codes; uses none of the event-input APIs.
 - `Keymory/AppComposition.swift` — **the one intentionally per-branch source file.**
   `makeInputSourceClient()` + `makeActivationDetector()` pick this variant's concrete
   types. This indirection is what lets every other core file stay byte-identical across
@@ -133,12 +154,21 @@ bundle id — no trace of the old name should reappear).
 - Tests in `KeymoryTests/`: `MappingStoreTests`, `SwitchControllerTests`
   (with `MockInputSourceClient` and `MockActivationDetector`), `MenuBarLabelTests`.
 
-## This branch (shared-core)
+## This branch (no-sandbox)
 
-`AppComposition.makeActivationDetector()` returns `nil`; the input client is the default
-`SystemInputSourceClient`. Behaviour is exactly the App Store base: detection via
-`NSWorkspace` activation only, the extra-window-tracking apparatus dormant, the "Track…"
-menu item hidden. App Sandbox ON. This branch is the eventual replacement for `main`.
+`AppComposition.makeActivationDetector()` returns an `AXActivationDetector`; the input
+client is the default `SystemInputSourceClient`. **App Sandbox is OFF**
+(`ENABLE_APP_SANDBOX = NO` in `Config/App.xcconfig`) — required because the sandbox forbids
+the Accessibility API against other processes. The menu shows **"Track All Windows"**
+(the detector's `menuTitle`), gated on the **Accessibility** permission; when on, the
+layout switches for any app's non-activating window *before the first keystroke* — the
+whole reason this variant drops the sandbox (the sandboxed `popup-window-tracking` build
+can only react to the first event, so its first character can land in the old layout).
+Everything else — the whole `SwitchController` apparatus, the menu wiring, the tests — is
+the shared core, byte-identical with the other branches. Terminal input-source
+"stickiness" (some terminals cache the source per TSM document) is **not** addressed here;
+the default `SystemInputSourceClient` is used, and `restore()` remains the seam where a
+more aggressive client would plug in if ever needed.
 
 ## Build / test / run
 
@@ -158,9 +188,13 @@ xcodebuild -project Keymory.xcodeproj -scheme Keymory -configuration Debug \
   CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= CODE_SIGN_STYLE=Manual
 
 # Install / run a dev build. NOT /Applications: that copy is the App Store install
-# (root-owned, has _MASReceipt) — leave it alone. Run a dev build straight from
-# build.noindex:
-/usr/bin/open build.noindex/Build/Products/Release/Keymory.app
+# (root-owned, has _MASReceipt) — leave it alone. On this branch install to a STABLE
+# path (~/Applications), not straight from build.noindex: the Accessibility grant is
+# keyed to the signed bundle, so a stable path keeps the grant across rebuilds.
+pkill -x Keymory
+rm -rf ~/Applications/Keymory.app
+cp -R build.noindex/Build/Products/Release/Keymory.app ~/Applications/
+/usr/bin/open ~/Applications/Keymory.app
 ```
 
 - **Never** build into the default DerivedData or an in-project `build/` — both are
@@ -171,6 +205,13 @@ xcodebuild -project Keymory.xcodeproj -scheme Keymory -configuration Debug \
   appear in Force Quit — that is expected.
 - Verify a real change end-to-end by driving apps: `osascript -e 'tell application "X"
   to activate'` + set/read the input source, then check restore (Finder ↔ Calculator).
+- This branch needs **Accessibility** for "Track All Windows": grant Keymory in System
+  Settings ▸ Privacy & Security ▸ Accessibility. The grant is live (the menu re-checks on
+  open — no relaunch) and survives rebuilds via the stable signing identity. Reset with
+  `tccutil reset Accessibility toxic0der.Keymory`. **Never validate AX with a
+  terminal-launched script** — it inherits the terminal's grant (responsible-process
+  attribution) and proves nothing; validate inside the installed app (a temporary
+  focus-log confirmed the mechanism on 2026-07-19).
 
 ## Key build settings
 
@@ -178,7 +219,9 @@ Version, signing team, and the sandbox flag are extracted into **`Config/App.xcc
 (wired via the app target's `baseConfigurationReference`) so `project.pbxproj` stays
 identical across branches and a version bump no longer edits the shared project file:
 `CURRENT_PROJECT_VERSION`, `MARKETING_VERSION`, `DEVELOPMENT_TEAM`, `ENABLE_APP_SANDBOX`
-(YES here; the personal build overrides to NO). Still in `project.pbxproj` (app target
+(**NO on this branch**; YES on the App Store branches — the single per-branch value in
+this file). `DEVELOPMENT_TEAM` is kept here too so the Accessibility grant survives
+rebuilds. Still in `project.pbxproj` (app target
 Debug+Release): `INFOPLIST_KEY_LSUIElement = YES`,
 `INFOPLIST_KEY_CFBundleDisplayName = Keymory`,
 `INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities"`,
@@ -216,6 +259,14 @@ test-target configs stay identical across branches.
   heuristics are dead; do not revisit. The sandbox-legal detection mechanism is the
   listen-only annotated-session `CGEventTap` under Input Monitoring — see the
   `popup-window-tracking` branch.
+- **This branch's mechanism, verified in-app (2026-07-19, non-sandboxed, macOS 26.5.2):**
+  once the app is non-sandboxed and Accessibility-granted, `AXIsProcessTrusted()` is true
+  and polling the system-wide `kAXFocusedApplicationAttribute` reports the owner of a
+  non-activating panel **while `NSWorkspace.frontmostApplication` still names the previous
+  app** — observed `focus → com.googlecode.iterm2` (and `com.apple.Spotlight`) with
+  `frontmost → <previous app>` when the panel opened. That gap is exactly what lets the
+  switch land before the first keystroke. Confirmed with a temporary focus-log inside the
+  installed app, then removed (per the "validate in-app, not via scripts" rule above).
 - Image tooling (CoreGraphics): in a `CGBitmapContext` here, **memory row 0 = top**
   (`memory_row == top-based y`) — do not flip when reading raw pixels. Drawing ops
   (`ctx.draw`/`ctx.fill`) still use the bottom-left coordinate system.
@@ -244,8 +295,8 @@ test-target configs stay identical across branches.
   loop in `restore()` is where it would be added.
 - Electron/terminal/Java apps that cache the input source per TSM document may ignore an
   otherwise-successful system switch.
-- Non-activating panels (Spotlight/Raycast, iTerm hotkey window, …) fire no
-  `didActivate`, so on this branch a layout change made there is attributed to the
-  previously frontmost app (self-corrects on next use). The optional
-  **"Track Pop-up Windows"** mode on the `popup-window-tracking` branch covers them via a
-  detector; the `personal` branch will switch proactively via the AX detector.
+- Non-activating panels (iTerm hotkey window, Spotlight, Raycast, …) fire no `didActivate`.
+  On this branch the optional **"Track All Windows"** mode (Accessibility) handles them
+  **proactively** — the layout switches before the first keystroke, no click needed. (The
+  sandboxed `popup-window-tracking` build covers the same panels via an event tap but can
+  only react to the first event; shared-core does not cover them at all.)
