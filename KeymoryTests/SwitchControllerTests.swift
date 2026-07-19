@@ -34,6 +34,45 @@ final class MockInputSourceClient: InputSourceClient {
 }
 
 @MainActor
+final class MockActivationDetector: ActivationDetector {
+    /// Whether the (simulated) permission is granted.
+    var permission = true
+    var menuTitle = "Track Windows"
+    var settingsURL: URL? = URL(string: "x-apple.systempreferences:test")
+    private(set) var isActive = false
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
+    private(set) var requestCount = 0
+    private var sink: ((String?) -> Void)?
+
+    func permissionGranted() -> Bool { permission }
+
+    @discardableResult
+    func requestPermission() -> Bool {
+        requestCount += 1
+        return permission
+    }
+
+    func start(onActivation: @escaping (String?) -> Void) -> Bool {
+        sink = onActivation
+        isActive = true
+        startCount += 1
+        return true
+    }
+
+    func stop() {
+        sink = nil
+        isActive = false
+        stopCount += 1
+    }
+
+    /// Simulates an input event / focus change routed to `bundleID`.
+    func emit(_ bundleID: String?) {
+        sink?(bundleID)
+    }
+}
+
+@MainActor
 final class SwitchControllerTests: XCTestCase {
     private static let ownBundleID = "test.keymory"
 
@@ -63,6 +102,17 @@ final class SwitchControllerTests: XCTestCase {
 
     private func awaitRecord() async {
         await controller.recordTask?.value
+    }
+
+    private func makeController(detector: ActivationDetector) -> SwitchController {
+        SwitchController(
+            store: store,
+            inputSources: mock,
+            detector: detector,
+            defaults: defaults,
+            ownBundleID: Self.ownBundleID,
+            frontmostProvider: { [weak self] in self?.frontmostForSeed }
+        )
     }
 
     // MARK: - Activation
@@ -392,5 +442,170 @@ final class SwitchControllerTests: XCTestCase {
 
         XCTAssertEqual(store.count, 0)
         XCTAssertEqual(controller.mappingCount, 0)
+    }
+
+    // MARK: - Extra-window tracking (detector)
+
+    func testNoDetectorMeansExtraTrackingUnsupported() {
+        // setUp's controller is built without a detector (the App Store build).
+        XCTAssertFalse(controller.supportsExtraTracking)
+        XCTAssertFalse(controller.extraTrackingActive)
+        XCTAssertNil(controller.extraTrackingTitle)
+    }
+
+    func testEnablingTrackingStartsDetectorWhenPermitted() {
+        let detector = MockActivationDetector()
+        let controller = makeController(detector: detector)
+
+        XCTAssertTrue(controller.supportsExtraTracking)
+        XCTAssertEqual(controller.toggleExtraTracking(), .enabled)
+
+        XCTAssertTrue(controller.trackExtraWindows)
+        XCTAssertTrue(detector.isActive)
+        XCTAssertTrue(controller.extraTrackingActive)
+        XCTAssertEqual(detector.startCount, 1)
+    }
+
+    func testTrackingStaysInactiveWithoutPermission() {
+        let detector = MockActivationDetector()
+        detector.permission = false
+        let controller = makeController(detector: detector)
+
+        XCTAssertEqual(controller.toggleExtraTracking(), .permissionRequired)
+        XCTAssertTrue(controller.trackExtraWindows)   // intent is stored
+        XCTAssertFalse(detector.isActive)             // but nothing is delivered
+        XCTAssertFalse(controller.extraTrackingActive)
+        XCTAssertEqual(detector.requestCount, 1)      // the prompt was requested
+    }
+
+    func testTogglingOffStopsDetector() {
+        let detector = MockActivationDetector()
+        let controller = makeController(detector: detector)
+        _ = controller.toggleExtraTracking()
+        XCTAssertTrue(detector.isActive)
+
+        XCTAssertEqual(controller.toggleExtraTracking(), .disabled)
+        XCTAssertFalse(controller.trackExtraWindows)
+        XCTAssertFalse(detector.isActive)
+    }
+
+    func testDetectedActivationRestoresStoredSource() async {
+        store.record(sourceID: "uk", for: "app.b")
+        mock.currentID = "en"
+        let detector = MockActivationDetector()
+        let controller = makeController(detector: detector)
+        _ = controller.toggleExtraTracking()
+
+        detector.emit("app.b")
+        await controller.restoreTask?.value
+
+        XCTAssertEqual(mock.selectedIDs, ["uk"])
+        XCTAssertEqual(mock.currentID, "uk")
+    }
+
+    func testDetectedActivationDedupsCurrentContext() {
+        store.record(sourceID: "en", for: "app.a")
+        mock.currentID = "en"
+        let detector = MockActivationDetector()
+        let controller = makeController(detector: detector)
+        _ = controller.toggleExtraTracking()
+        controller.handleActivation(bundleID: "app.a")   // frontmost = app.a
+
+        // A detector signal for the app that already holds the context is a
+        // no-op — no restore/record churn.
+        detector.emit("app.a")
+
+        XCTAssertTrue(mock.selectedIDs.isEmpty)
+        XCTAssertNil(controller.restoreTask)
+    }
+
+    func testDetectedActivationIgnoredWhenTrackingOff() {
+        store.record(sourceID: "uk", for: "app.b")
+        mock.currentID = "en"
+        let detector = MockActivationDetector()
+        let controller = makeController(detector: detector)
+        // Tracking never enabled: a stray emit must do nothing.
+        detector.emit("app.b")
+
+        XCTAssertTrue(mock.selectedIDs.isEmpty)
+        XCTAssertNil(controller.restoreTask)
+    }
+
+    func testDetectedActivationIgnoresSystemUISurfaces() {
+        mock.currentID = "en"
+        store.record(sourceID: "uk", for: "com.apple.dock")   // even with a stored mapping
+        let detector = MockActivationDetector()
+        let controller = makeController(detector: detector)
+        _ = controller.toggleExtraTracking()
+        controller.handleActivation(bundleID: "app.a")        // frontmost = app.a
+
+        detector.emit("com.apple.dock")                        // a click on the Dock
+
+        // The Dock must never take the context: no restore, no churn.
+        XCTAssertTrue(mock.selectedIDs.isEmpty)
+        XCTAssertNil(controller.restoreTask)
+    }
+
+    func testDisablingControllerStopsDetector() {
+        let detector = MockActivationDetector()
+        let controller = makeController(detector: detector)
+        _ = controller.toggleExtraTracking()
+        XCTAssertTrue(detector.isActive)
+
+        controller.isEnabled = false
+
+        XCTAssertFalse(detector.isActive)
+    }
+
+    func testScreenLockStopsDetectorAndUnlockRestarts() {
+        let detector = MockActivationDetector()
+        let controller = makeController(detector: detector)
+        _ = controller.toggleExtraTracking()
+        XCTAssertTrue(detector.isActive)
+
+        controller.handleScreenLockChange(locked: true)
+        XCTAssertFalse(detector.isActive)
+
+        controller.handleScreenLockChange(locked: false)
+        XCTAssertTrue(detector.isActive)
+    }
+
+    func testTrackExtraWindowsPersistsAcrossInstances() {
+        let detector = MockActivationDetector()
+        let controller = makeController(detector: detector)
+        _ = controller.toggleExtraTracking()
+        XCTAssertTrue(controller.trackExtraWindows)
+
+        let reloaded = SwitchController(
+            store: store,
+            inputSources: mock,
+            defaults: defaults,
+            ownBundleID: Self.ownBundleID,
+            frontmostProvider: { nil }
+        )
+
+        XCTAssertTrue(reloaded.trackExtraWindows)
+    }
+
+    func testDetectedActivationPreservesPendingManualSwitchViaSnapshot() async {
+        // A detector-driven activation routes through handleActivation, which
+        // cancels a pending deferred recordTask. The outgoing context's manual
+        // switch must still be preserved — captured by the switch-away
+        // snapshot — rather than silently dropped.
+        mock.currentID = "en"
+        let detector = MockActivationDetector()
+        let controller = makeController(detector: detector)
+        _ = controller.toggleExtraTracking()
+
+        controller.handleActivation(bundleID: "panel")   // frontmost = panel (adopts en)
+        mock.currentID = "uk"                             // user switches layout in the panel
+        controller.handleSourceChange()                  // schedules the deferred record
+        let pending = controller.recordTask
+
+        detector.emit("app.a")                            // new context before the record settles
+        await pending?.value                              // the record was cancelled
+        await controller.restoreTask?.value
+
+        XCTAssertEqual(store.entry(for: "panel")?.sourceID, "uk")
     }
 }

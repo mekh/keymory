@@ -41,7 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var renderedLabelKey: String?
     private let controller = SwitchController(
         store: MappingStore(defaults: .standard),
-        inputSources: SystemInputSourceClient()
+        inputSources: AppComposition.makeInputSourceClient(),
+        detector: AppComposition.makeActivationDetector()
     )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -162,6 +163,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.isEnabled.toggle()
     }
 
+    @objc private func toggleExtraTracking() {
+        // `.permissionRequired`: the intent is stored but the detector's
+        // permission is still missing. Route to the relevant System Settings
+        // pane (this also covers re-enabling after an earlier denial, when
+        // macOS no longer shows a prompt).
+        if controller.toggleExtraTracking() == .permissionRequired,
+           let url = controller.extraTrackingSettingsURL {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     @objc private func openKeyboardSettings() {
         // Same destination as the system input menu's "Open Keyboard Settings…"
         // — the Keyboard pane, whose Input Sources section holds the Edit sheet.
@@ -215,6 +227,22 @@ extension AppDelegate: NSMenuDelegate {
         enabled.target = self
         enabled.state = controller.isEnabled ? .on : .off
         menu.addItem(enabled)
+
+        // Optional extra-window tracking, shown only on builds that inject a
+        // detector (hidden on the App Store build). Re-check on every menu open
+        // so a permission granted in System Settings since the last look starts
+        // the detector without a relaunch. .mixed = enabled but still waiting
+        // for the permission.
+        if controller.supportsExtraTracking {
+            controller.refreshExtraTracking()
+            let track = NSMenuItem(title: controller.extraTrackingTitle ?? "Track Windows",
+                                   action: #selector(toggleExtraTracking), keyEquivalent: "")
+            track.target = self
+            track.state = controller.trackExtraWindows
+                ? (controller.extraTrackingActive ? .on : .mixed)
+                : .off
+            menu.addItem(track)
+        }
 
         let showFlag = NSMenuItem(title: "Show Flag",
                                   action: #selector(toggleShowFlag), keyEquivalent: "")
