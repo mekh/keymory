@@ -24,10 +24,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		27F16AE0300A56C200753D3D /* App.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Config/App.xcconfig"; sourceTree = "<group>"; };
 		27F16AB0300A56C100753D3D /* Keymory.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Keymory.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		27F16ABF300A56C200753D3D /* KeymoryTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KeymoryTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		27F16AC9300A56C200753D3D /* KeymoryUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KeymoryUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		27F16AE0300A56C200753D3D /* Config/App.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/App.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -76,7 +76,7 @@
 		27F16AA7300A56C100753D3D = {
 			isa = PBXGroup;
 			children = (
-				27F16AE0300A56C200753D3D /* App.xcconfig */,
+				27F16AE0300A56C200753D3D /* Config/App.xcconfig */,
 				27F16AB2300A56C100753D3D /* Keymory */,
 				27F16AC2300A56C200753D3D /* KeymoryTests */,
 				27F16ACC300A56C200753D3D /* KeymoryUITests */,
@@ -391,7 +391,7 @@
 		};
 		27F16AD4300A56C200753D3D /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 27F16AE0300A56C200753D3D /* App.xcconfig */;
+			baseConfigurationReference = 27F16AE0300A56C200753D3D /* Config/App.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -436,7 +436,7 @@
 		};
 		27F16AD5300A56C200753D3D /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 27F16AE0300A56C200753D3D /* App.xcconfig */;
+			baseConfigurationReference = 27F16AE0300A56C200753D3D /* Config/App.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
