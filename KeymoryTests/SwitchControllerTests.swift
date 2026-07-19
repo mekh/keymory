@@ -61,6 +61,10 @@ final class SwitchControllerTests: XCTestCase {
         await controller.restoreTask?.value
     }
 
+    private func awaitRecord() async {
+        await controller.recordTask?.value
+    }
+
     // MARK: - Activation
 
     func testFirstSeenAppAdoptsCurrentSource() {
@@ -192,7 +196,7 @@ final class SwitchControllerTests: XCTestCase {
         XCTAssertEqual(store.entry(for: "app.b")?.sourceID, "uk")
     }
 
-    func testOwnBundleIDIsIgnored() {
+    func testOwnBundleIDIsIgnored() async {
         mock.currentID = "en"
 
         controller.handleActivation(bundleID: Self.ownBundleID)
@@ -204,11 +208,12 @@ final class SwitchControllerTests: XCTestCase {
         controller.handleActivation(bundleID: Self.ownBundleID)
         mock.currentID = "uk"
         controller.handleSourceChange()
+        await awaitRecord()
 
         XCTAssertEqual(store.entry(for: "app.a")?.sourceID, "uk")
     }
 
-    func testNilBundleIDIsNeverPersisted() {
+    func testNilBundleIDIsNeverPersisted() async {
         mock.currentID = "en"
 
         controller.handleActivation(bundleID: nil)
@@ -218,6 +223,7 @@ final class SwitchControllerTests: XCTestCase {
         // Layout changes while an unattributed process is frontmost are dropped.
         mock.currentID = "uk"
         controller.handleSourceChange()
+        await awaitRecord()
 
         XCTAssertEqual(store.count, 0)
     }
@@ -249,14 +255,48 @@ final class SwitchControllerTests: XCTestCase {
 
     // MARK: - Source-change recording
 
-    func testSourceChangeRecordedForFrontmostApp() {
+    func testSourceChangeRecordedForFrontmostApp() async {
         mock.currentID = "en"
         controller.handleActivation(bundleID: "app.a")
 
         mock.currentID = "uk"
         controller.handleSourceChange()
+        await awaitRecord()
 
         XCTAssertEqual(store.entry(for: "app.a")?.sourceID, "uk")
+    }
+
+    func testSourceChangeRecordsSettledValueNotNotificationTimeValue() async {
+        mock.currentID = "en"
+        controller.handleActivation(bundleID: "app.a")
+
+        // Field bug: at notification time TIS still reports the old source
+        // ("en"); the switch to "uk" becomes visible only after the settle
+        // delay. The deferred read must record the settled value.
+        controller.handleSourceChange()
+        mock.currentID = "uk"
+        await awaitRecord()
+
+        XCTAssertEqual(store.entry(for: "app.a")?.sourceID, "uk")
+    }
+
+    func testActivationCancelsPendingSourceChangeRecord() async {
+        store.record(sourceID: "fr", for: "app.b")
+        mock.currentID = "en"
+        controller.handleActivation(bundleID: "app.a")
+
+        // Manual switch, then an app activation before the deferred read
+        // fires: the pending record must not observe app.b's restored source
+        // and attribute it to app.a.
+        controller.handleSourceChange()
+        let pending = controller.recordTask
+        mock.currentID = "uk"
+        controller.handleActivation(bundleID: "app.b")
+        await pending?.value
+        await awaitRestore()
+
+        XCTAssertEqual(store.entry(for: "app.a")?.sourceID, "uk")
+        XCTAssertEqual(mock.currentID, "fr")
     }
 
     func testSwitchAwaySnapshotCapturesMissedChange() {
@@ -281,6 +321,7 @@ final class SwitchControllerTests: XCTestCase {
         // than the one we just restored: must still be recorded.
         mock.currentID = "fr"
         controller.handleSourceChange()
+        await awaitRecord()
 
         XCTAssertEqual(store.entry(for: "app.b")?.sourceID, "fr")
     }
@@ -328,7 +369,7 @@ final class SwitchControllerTests: XCTestCase {
         XCTAssertEqual(store.entry(for: "app.a")?.sourceID, "en")
     }
 
-    func testUnlockReseedsFrontmostApp() {
+    func testUnlockReseedsFrontmostApp() async {
         mock.currentID = "en"
         frontmostForSeed = "app.a"
 
@@ -336,6 +377,7 @@ final class SwitchControllerTests: XCTestCase {
         controller.handleScreenLockChange(locked: false)
         mock.currentID = "uk"
         controller.handleSourceChange()
+        await awaitRecord()
 
         XCTAssertEqual(store.entry(for: "app.a")?.sourceID, "uk")
     }

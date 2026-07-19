@@ -33,6 +33,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem?
     private var sourceChangeObserver: NSObjectProtocol?
+    private var appActivationObserver: NSObjectProtocol?
+    private var labelRecheckTask: Task<Void, Never>?
+    /// Style + text of the last rendered label, to skip identical repaints
+    /// (the re-check cascade and the activation hook mostly confirm an
+    /// unchanged source).
+    private var renderedLabelKey: String?
     private let controller = SwitchController(
         store: MappingStore(defaults: .standard),
         inputSources: SystemInputSourceClient()
@@ -61,6 +67,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.updateStatusAppearance()
+                self?.scheduleLabelRecheck()
+            }
+        }
+
+        // A window switch settles the TIS value, so repainting here heals a
+        // label that went stale while no further change notifications arrived.
+        appActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.updateStatusAppearance()
+            }
+        }
+    }
+
+    /// Immediately after the change notification `TISCopyCurrentKeyboardInputSource`
+    /// can still return the *previous* source — the process-local value settles
+    /// asynchronously, which showed up in the field as a label permanently one
+    /// switch behind. Re-read shortly after (and once more as a safety net) so
+    /// a stale first paint self-corrects.
+    private func scheduleLabelRecheck() {
+        labelRecheckTask?.cancel()
+        labelRecheckTask = Task { [weak self] in
+            for delay: Duration in [.milliseconds(150), .milliseconds(1000)] {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled else { return }
+                self?.updateStatusAppearance()
             }
         }
     }
@@ -72,9 +105,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem?.button else { return }
         let scaledSize = NSFont.menuBarFont(ofSize: 0).pointSize * Self.labelScale
         let style: MenuBarStyle = controller.showFlag ? .flag : .code
+        let label = MenuBarLabel.text(languageCode: controller.currentSourceLanguageCode(),
+                                      style: style)
+        let key = "\(style)|\(label ?? "-")"
+        guard key != renderedLabelKey else { return }
+        renderedLabelKey = key
         button.title = ""
-        if let label = MenuBarLabel.text(languageCode: controller.currentSourceLanguageCode(),
-                                         style: style) {
+        if let label {
             // Render into a vertically centered image: setting it as the button
             // title aligns emoji on the text baseline (visibly off-center),
             // whereas NSStatusItem centers an image cleanly.

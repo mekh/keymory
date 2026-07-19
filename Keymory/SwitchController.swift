@@ -14,6 +14,12 @@ final class SwitchController {
     private static let defaultSourceIDKey = "defaultSourceID"
     private static let showFlagKey = "showFlag"
     private static let suppressionWindow: Duration = .seconds(1)
+    /// How long to wait before reading the current source after a change
+    /// notification. Immediately after the notification
+    /// `TISCopyCurrentKeyboardInputSource` can still return the *previous*
+    /// source (the process-local value settles asynchronously; observed in the
+    /// field as recording/showing the source one switch behind).
+    private static let settleDelay: Duration = .milliseconds(250)
     private static let inputSourceChangedNotification =
         Notification.Name("com.apple.Carbon.TISNotifySelectedKeyboardInputSourceChanged")
     private static let screenLockedNotification = Notification.Name("com.apple.screenIsLocked")
@@ -58,6 +64,10 @@ final class SwitchController {
 
     private var frontmostBundleID: String?
     private(set) var restoreTask: Task<Void, Never>?
+    /// Deferred recording of a manual source change (see `settleDelay`).
+    /// Cancelled on app activation: once the frontmost app changes, the
+    /// pending read could observe the next app's restored source instead.
+    private(set) var recordTask: Task<Void, Never>?
     /// Our own recent programmatic switch: change notifications matching this
     /// source inside the deadline are ours and must not be recorded. Passive
     /// expiry (no clearing) avoids any clear-too-early race with the
@@ -157,6 +167,7 @@ final class SwitchController {
         guard bundleID != ownBundleID else { return }
 
         restoreTask?.cancel()
+        recordTask?.cancel()
 
         // Switch-away snapshot: capture the outgoing app's source in case its
         // change notification was late or swallowed by the suppression window.
@@ -199,6 +210,21 @@ final class SwitchController {
     func handleSourceChange() {
         guard isEnabled, !isScreenLocked else { return }
         guard let bundleID = frontmostBundleID else { return }
+        recordTask?.cancel()
+        recordTask = Task {
+            await recordSettledSource(for: bundleID)
+        }
+    }
+
+    /// Reads the current source only after `settleDelay` so a stale
+    /// notification-time value is never recorded, then applies the same
+    /// suppression / attribution rules as before.
+    private func recordSettledSource(for bundleID: String) async {
+        try? await Task.sleep(for: Self.settleDelay)
+        guard !Task.isCancelled, isEnabled, !isScreenLocked else { return }
+        // Frontmost changed mid-delay: the switch-away snapshot in
+        // handleActivation already captured the outgoing app.
+        guard frontmostBundleID == bundleID else { return }
         guard let current = inputSources.currentSourceID() else { return }
         if let suppression,
            suppression.sourceID == current,

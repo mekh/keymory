@@ -32,17 +32,23 @@ bundle id — no trace of the old name should reappear).
   Uses `NSStatusItem` **not** SwiftUI `MenuBarExtra` (MenuBarExtra did not reliably
   appear for a menu-bar-only app on this macOS). Menu is an `NSMenu` rebuilt in
   `menuNeedsUpdate`. `updateStatusAppearance()` renders the current-language indicator
-  (flag or code) into a vertically-centred image; it is refreshed on the distributed TIS
-  notification. `item.autosaveName = "KeymoryStatusItem"` persists the icon position.
+  (flag or code) into a vertically-centred image; it skips identical repaints
+  (`renderedLabelKey`) and is refreshed on the distributed TIS notification **plus a
+  re-check cascade** (`scheduleLabelRecheck`: cancellable re-reads at 150 ms and 1 s)
+  and on `didActivateApplication` — because a TIS read at notification time can still
+  return the *previous* source (see Critical technical facts). `item.autosaveName =
+  "KeymoryStatusItem"` persists the icon position.
   "Forget All" is tinted red via `attributedTitle` (NSColor.systemRed).
 - `Keymory/SwitchController.swift` — `@Observable @MainActor` state machine.
   `handleActivation` order: guard enabled/lock → ignore own bundle id → cancel
   `restoreTask` → **switch-away snapshot** (record outgoing app's current source, guarded
   by `lastRestore.verified`) → set frontmost → first-seen (adopt Default Language or
   current) / known (restore if differs). `handleSourceChange` records the user's manual
-  switches, skipped when inside the **suppression window** (value + monotonic
-  `ContinuousClock` deadline — not a boolean; the distributed notification arrives
-  asynchronously). `restore()` = cancellable verify/retry loop (select → sleep 50ms →
+  switches **after a 250 ms settle delay** (cancellable `recordTask`, cancelled on
+  activation and re-issue; the read is deferred because a notification-time TIS read
+  can return the previous source), skipped when inside the **suppression window**
+  (value + monotonic `ContinuousClock` deadline — not a boolean; the distributed
+  notification arrives asynchronously). `restore()` = cancellable verify/retry loop (select → sleep 50ms →
   confirm, ×3) — this loop is the seam where CJKV handling would plug in. `start()` is
   idempotent (`started` guard), seeds the frontmost app at launch **without** restoring
   or recording, and handles screen lock/unlock.
@@ -74,13 +80,17 @@ it is gitignored) to avoid duplicate `Keymory.app` entries in Spotlight/Finder.
 xcodebuild -project Keymory.xcodeproj -scheme Keymory -configuration Release \
   -derivedDataPath build.noindex build
 
-# Unit tests
+# Unit tests — since the App Store hardening the app target signs with the real
+# Team ID while test bundles sign ad-hoc, and dlopen rejects the mix ("different
+# Team IDs"). Override to ad-hoc for the whole test run:
 xcodebuild -project Keymory.xcodeproj -scheme Keymory -configuration Debug \
-  -derivedDataPath build.noindex test -only-testing:KeymoryTests
+  -derivedDataPath build.noindex test -only-testing:KeymoryTests \
+  CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= CODE_SIGN_STYLE=Manual
 
-# Install / run
-cp -R build.noindex/Build/Products/Release/Keymory.app /Applications/
-/usr/bin/open /Applications/Keymory.app
+# Install / run. NOTE: /Applications/Keymory.app is now the Mac App Store copy
+# (root-owned, _MASReceipt) — it cannot be overwritten without sudo. Run dev
+# builds straight from build.noindex instead:
+/usr/bin/open build.noindex/Build/Products/Release/Keymory.app
 ```
 
 - **Never** build into the default DerivedData or an in-project `build/` — both are
@@ -114,6 +124,12 @@ cp -R build.noindex/Build/Products/Release/Keymory.app /Applications/
 - **Do NOT verify a UserDefaults write or notification delivery by reading the plist file
   directly** — `cfprefsd` caches it and the on-disk file can be stale (this produced a
   false "notification blocked" result). Use a file append from the handler, or the live UI.
+- **A TIS read inside the `TISNotifySelectedKeyboardInputSourceChanged` handler can
+  still return the PREVIOUS source** — the process-local value settles asynchronously
+  (reliably only after a keystroke or window switch; kawa PR #21, macism's 150 ms wait).
+  Field bug on an M4 Air: the menu-bar label stayed permanently one switch behind
+  ("inverted" with 2 layouts). Never read TIS synchronously off that notification
+  without a delayed re-read (label re-check cascade / `recordTask` settle delay).
 - Image tooling (CoreGraphics): in a `CGBitmapContext` here, **memory row 0 = top**
   (`memory_row == top-based y`) — do not flip when reading raw pixels. Drawing ops
   (`ctx.draw`/`ctx.fill`) still use the bottom-left coordinate system.
