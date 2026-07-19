@@ -129,7 +129,16 @@ bundle id — no trace of the old name should reappear).
   focused-app read is the reliable signal and is cheap (it hits the AX runtime, not the
   target app, so it can't hang on an unresponsive app), whereas per-app focus
   notifications are flaky for non-activating panels. `AXUIElementSetMessagingTimeout` 0.25 s
-  guards the read. Permission via `AXIsProcessTrusted` / `AXIsProcessTrustedWithOptions`;
+  guards the read. **AX-silent apps:** Chromium-based apps (Chrome, Slack, Electron, …)
+  take keyboard focus without the AX runtime ever reporting a focused application
+  (`kAXErrorNoValue` on every poll), so a panel hiding over them yields no focus signal.
+  After 2 consecutive read failures (240 ms debounce) the detector reports
+  `NSWorkspace.frontmostApplication` as the focus owner — with no AX focus holder it is
+  the only possible typing target. Without this fallback the tracked context stayed stuck
+  on the hidden panel's app: the frontmost app's layout was never restored and manual
+  switches were mis-attributed to the panel app (the Chrome/Slack hotkey bug, fixed
+  2026-07-19). Apps that vend focus (Telegram/Qt, native, Spotlight, iTerm) never touch
+  the fallback. Permission via `AXIsProcessTrusted` / `AXIsProcessTrustedWithOptions`;
   the grant is live (no relaunch) and, because AX only reads *which* app has focus, never
   keystrokes/content. Reads no key codes; uses none of the event-input APIs.
 - `Keymory/AppComposition.swift` — **the one intentionally per-branch source file.**
@@ -267,6 +276,15 @@ test-target configs stay identical across branches.
   `frontmost → <previous app>` when the panel opened. That gap is exactly what lets the
   switch land before the first keystroke. Confirmed with a temporary focus-log inside the
   installed app, then removed (per the "validate in-app, not via scripts" rule above).
+- **Chromium-based apps are AX-silent (verified in-app 2026-07-19, macOS 26.5.2):** with
+  Chrome, Slack or an Electron app frontmost *and focused*, the system-wide
+  `kAXFocusedApplicationAttribute` read fails with `kAXErrorNoValue` (-25212) on every
+  poll — even though typing works fine. So a hotkey panel hiding over such an app
+  produces no focus event at all: the detector's last-reported pid stays on the panel's
+  app, the layout is never restored (stuck on the panel's source), and manual switches
+  are recorded against the panel's app. The detector's frontmost fallback (2 consecutive
+  read failures → report `NSWorkspace.frontmostApplication`) fixes the whole class with
+  no per-app list; native/Qt apps vend focus normally and are unaffected.
 - Image tooling (CoreGraphics): in a `CGBitmapContext` here, **memory row 0 = top**
   (`memory_row == top-based y`) — do not flip when reading raw pixels. Drawing ops
   (`ctx.draw`/`ctx.fill`) still use the bottom-left coordinate system.

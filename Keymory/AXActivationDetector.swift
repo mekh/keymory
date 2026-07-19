@@ -29,6 +29,15 @@ import ApplicationServices
 /// non-activating panels; the read is cheap (it hits the AX runtime, not the
 /// target app) and only runs while the option is enabled.
 ///
+/// AX-silent apps: Chromium-based apps (Chrome, Slack, Electron, …) take
+/// keyboard focus without the AX runtime ever reporting a focused application
+/// (`kAXErrorNoValue` on every poll). A panel hiding over such an app then
+/// produces no focus signal at all — the tracked context would stay stuck on
+/// the panel's app and the layout would never be restored (verified in-app
+/// 2026-07-19: iTerm hotkey window hiding over an Electron frontmost app).
+/// When the read keeps failing, the frontmost app is the only possible typing
+/// target, so after a short debounce it is reported as the focus owner.
+///
 /// Privacy: this reads *which application* holds focus — never keystrokes or
 /// window contents. It does not use the event-input APIs at all.
 @MainActor
@@ -39,6 +48,10 @@ final class AXActivationDetector: ActivationDetector {
     /// Upper bound on a single AX request so an unresponsive target can never
     /// stall the poll. The focused-application read normally returns instantly.
     private static let messagingTimeout: Float = 0.25
+    /// Consecutive read failures before falling back to the frontmost app.
+    /// Two polls (240 ms) debounce transient mid-transition errors while
+    /// staying well ahead of the user's next keystroke.
+    private static let readFailureThreshold = 2
 
     private let systemWide = AXUIElementCreateSystemWide()
     private var pollTask: Task<Void, Never>?
@@ -46,6 +59,8 @@ final class AXActivationDetector: ActivationDetector {
     /// Pid that last held focus; downstream work is gated on it changing so a
     /// steady focus produces no repeated activations.
     private var lastPID: pid_t = -1
+    /// Consecutive AX read failures; see `readFailureThreshold`.
+    private var readFailures = 0
 
     var isActive: Bool { pollTask != nil }
 
@@ -73,6 +88,7 @@ final class AXActivationDetector: ActivationDetector {
             return false
         }
         lastPID = -1
+        readFailures = 0
         AXUIElementSetMessagingTimeout(systemWide, Self.messagingTimeout)
         pollTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -89,6 +105,7 @@ final class AXActivationDetector: ActivationDetector {
         pollTask = nil
         onActivation = nil
         lastPID = -1
+        readFailures = 0
     }
 
     private func poll() {
@@ -98,14 +115,34 @@ final class AXActivationDetector: ActivationDetector {
         guard status == .success,
               let value,
               CFGetTypeID(value) == AXUIElementGetTypeID() else {
+            fallBackToFrontmost()
             return
         }
         // Safe: the type id check above guarantees this is an AXUIElement.
         let appElement = value as! AXUIElement
         var pid: pid_t = 0
-        guard AXUIElementGetPid(appElement, &pid) == .success, pid > 0 else { return }
+        guard AXUIElementGetPid(appElement, &pid) == .success, pid > 0 else {
+            fallBackToFrontmost()
+            return
+        }
+        readFailures = 0
         guard pid != lastPID else { return }
         lastPID = pid
         onActivation?(NSRunningApplication(processIdentifier: pid)?.bundleIdentifier)
+    }
+
+    /// When the AX read keeps failing (AX-silent apps such as Chromium-based
+    /// ones return `kAXErrorNoValue` even while their window holds keyboard
+    /// focus), no focus-holder exists as far as AX is concerned, so the
+    /// frontmost app is the only possible typing target. After the debounce
+    /// threshold it is reported as the focus owner, which lets the controller
+    /// leave a stuck panel context and restore the frontmost app's layout.
+    private func fallBackToFrontmost() {
+        readFailures += 1
+        guard readFailures >= Self.readFailureThreshold,
+              let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != lastPID else { return }
+        lastPID = app.processIdentifier
+        onActivation?(app.bundleIdentifier)
     }
 }
