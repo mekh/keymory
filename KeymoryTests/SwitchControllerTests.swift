@@ -406,6 +406,78 @@ final class SwitchControllerTests: XCTestCase {
         XCTAssertEqual(mock.selectedIDs.filter { $0 == "uk" }, ["uk"])
     }
 
+    func testDisablingCancelsInFlightRestore() async {
+        store.record(sourceID: "uk", for: "app.b")
+        mock.currentID = "en"
+        mock.selectLands = false   // force retries so the restore stays in flight
+
+        controller.handleActivation(bundleID: "app.b")
+        let inFlight = controller.restoreTask
+        await Task.yield()
+
+        // Disabling the feature must stop the loop: no further select after the
+        // first, and no layout flip lands once "off".
+        controller.isEnabled = false
+        await inFlight?.value
+
+        XCTAssertEqual(mock.selectedIDs.filter { $0 == "uk" }, ["uk"])
+    }
+
+    func testScreenLockCancelsInFlightRestore() async {
+        store.record(sourceID: "uk", for: "app.b")
+        mock.currentID = "en"
+        mock.selectLands = false
+
+        controller.handleActivation(bundleID: "app.b")
+        let inFlight = controller.restoreTask
+        await Task.yield()
+
+        // A screen lock must stop the loop so no source flip happens under the
+        // lock/password screen.
+        controller.handleScreenLockChange(locked: true)
+        await inFlight?.value
+
+        XCTAssertEqual(mock.selectedIDs.filter { $0 == "uk" }, ["uk"])
+    }
+
+    func testForgetAllCancelsPendingRecord() async {
+        mock.currentID = "en"
+        controller.handleActivation(bundleID: "app.a")   // adopts en
+
+        mock.currentID = "uk"
+        controller.handleSourceChange()                  // schedules a deferred record
+        let pending = controller.recordTask
+
+        // Wiping the map must cancel the settling record so it cannot re-add an
+        // entry a beat after "Forget All".
+        controller.forgetAll()
+        await pending?.value
+
+        XCTAssertEqual(store.count, 0)
+        XCTAssertEqual(controller.mappingCount, 0)
+    }
+
+    func testUnverifiedRestoreDoesNotOverwriteMappingViaSelfNotification() async {
+        store.record(sourceID: "uk", for: "app.b")
+        mock.currentID = "en"
+        // The select "succeeds" (posts a change notification) but the source
+        // never actually becomes uk — an app that re-asserts its own source
+        // per TSM document (terminal/Electron). The restore stays unverified.
+        mock.selectSucceeds = true
+        mock.selectLands = false
+
+        controller.handleActivation(bundleID: "app.b")
+        await awaitRestore()
+
+        // The restore's own (non-landing) attempt produced a change
+        // notification. It must NOT overwrite app.b's stored mapping with the
+        // wrong, still-current "en".
+        controller.handleSourceChange()
+        await awaitRecord()
+
+        XCTAssertEqual(store.entry(for: "app.b")?.sourceID, "uk")
+    }
+
     // MARK: - Screen lock
 
     func testChangesWhileLockedAreNotRecorded() {
