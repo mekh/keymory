@@ -53,6 +53,11 @@ final class SwitchController {
             updateDetector()
             if isEnabled {
                 seedFrontmostApp()
+            } else {
+                // Disabled must be inert: cancel any restore/record already in
+                // flight so a deferred layout flip can't land a beat after the
+                // user turns the feature off.
+                cancelPendingWork()
             }
         }
     }
@@ -329,6 +334,17 @@ final class SwitchController {
         // handleActivation already captured the outgoing app.
         guard frontmostBundleID == bundleID else { return }
         guard let current = inputSources.currentSourceID() else { return }
+        // An unverified restore for this app means the current source is our own
+        // not-yet-landed attempt (e.g. an app that re-asserts its own source),
+        // not the user's choice. Recording it here would overwrite the stored
+        // mapping with the wrong value. Skip while the restore's suppression
+        // window is still open; a genuine later manual change is recorded once
+        // the window expires or via the next switch-away snapshot. Mirrors the
+        // switch-away snapshot's own `lastRestore.verified` guard.
+        if let lastRestore, lastRestore.bundleID == bundleID, !lastRestore.verified,
+           let suppression, clock.now < suppression.deadline {
+            return
+        }
         if let suppression,
            suppression.sourceID == current,
            clock.now < suppression.deadline {
@@ -339,6 +355,9 @@ final class SwitchController {
     }
 
     func forgetAll() {
+        // Cancel in-flight work first: a settling record must not re-add an
+        // entry immediately after the wipe.
+        cancelPendingWork()
         store.removeAll()
         mappingCount = 0
     }
@@ -346,7 +365,11 @@ final class SwitchController {
     func handleScreenLockChange(locked: Bool) {
         isScreenLocked = locked
         updateDetector()
-        if !locked {
+        if locked {
+            // Never flip the layout while the screen is locked (e.g. under the
+            // password field): cancel any restore/record still in flight.
+            cancelPendingWork()
+        } else {
             // The login window may have switched the source; re-baseline so
             // its changes are not attributed to the frontmost app.
             seedFrontmostApp()
@@ -371,10 +394,21 @@ final class SwitchController {
         frontmostBundleID = bundleID == ownBundleID ? nil : bundleID
     }
 
+    /// Cancels any restore/record currently in flight. Used when the feature is
+    /// disabled, the screen locks, or the map is wiped, so no deferred layout
+    /// change or record can land after the state that triggered it has changed.
+    private func cancelPendingWork() {
+        restoreTask?.cancel()
+        recordTask?.cancel()
+    }
+
     private func restore(_ targetID: String, for bundleID: String) async {
         lastRestore = (bundleID, verified: false)
         for _ in 0..<3 {
-            guard !Task.isCancelled else { return }
+            // Re-check enabled/unlocked after every suspension, not just
+            // cancellation: "disabled" and "locked" must be inert even against
+            // a restore that was already past its guard when the state flipped.
+            guard !Task.isCancelled, isEnabled, !isScreenLocked else { return }
             suppression = (targetID, clock.now.advanced(by: Self.suppressionWindow))
             // Missing/disabled layout: keep the current source silently and
             // keep the stored entry — the user may re-enable the layout later.
@@ -383,7 +417,7 @@ final class SwitchController {
             // loop is the seam where CJKV-specific remediation (e.g. the
             // macism temporary-window trick) would plug in if ever needed.
             try? await Task.sleep(for: .milliseconds(50))
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, isEnabled, !isScreenLocked else { return }
             if inputSources.currentSourceID() == targetID {
                 lastRestore = (bundleID, verified: true)
                 return
