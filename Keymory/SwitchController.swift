@@ -13,16 +13,28 @@ final class SwitchController {
     private static let isEnabledKey = "isEnabled"
     private static let defaultSourceIDKey = "defaultSourceID"
     private static let showFlagKey = "showFlag"
-    private static let trackPopUpsKey = "trackPopUpWindows"
+    /// Persisted intent for optional extra-window tracking. Literal kept as
+    /// `"trackPopUpWindows"` for backward compatibility: the shipped pop-up
+    /// build shares the `toxic0der.Keymory` defaults domain, so renaming the
+    /// key would silently reset an existing user's toggle.
+    private static let trackExtraWindowsKey = "trackPopUpWindows"
     private static let suppressionWindow: Duration = .seconds(1)
+    /// How long to wait before reading the current source after a change
+    /// notification. Immediately after the notification
+    /// `TISCopyCurrentKeyboardInputSource` can still return the *previous*
+    /// source (the process-local value settles asynchronously; observed in the
+    /// field as recording/showing the source one switch behind).
+    private static let settleDelay: Duration = .milliseconds(250)
     private static let inputSourceChangedNotification =
         Notification.Name("com.apple.Carbon.TISNotifySelectedKeyboardInputSourceChanged")
     private static let screenLockedNotification = Notification.Name("com.apple.screenIsLocked")
     private static let screenUnlockedNotification = Notification.Name("com.apple.screenIsUnlocked")
     /// Transient system surfaces that grab clicks or keystrokes but must never
     /// own the layout context: reacting to them would flip the layout on every
-    /// Dock click or menu-bar interaction. Any other event-tap target — any
-    /// app's non-activating panel, present or future — is tracked.
+    /// Dock click or menu-bar interaction. Any other detected target — any
+    /// app's non-activating panel, present or future — is tracked. Kept in the
+    /// core (not the detector) so the guarantee stays unit-testable and every
+    /// variant shares it; a detector may additionally suppress its own noise.
     private static let systemUIBundleIDs: Set<String> = [
         "com.apple.dock",
         "com.apple.controlcenter",
@@ -38,7 +50,7 @@ final class SwitchController {
     var isEnabled: Bool {
         didSet {
             defaults.set(isEnabled, forKey: Self.isEnabledKey)
-            updateEventTap()
+            updateDetector()
             if isEnabled {
                 seedFrontmostApp()
             }
@@ -66,30 +78,34 @@ final class SwitchController {
         didSet { defaults.set(showFlag, forKey: Self.showFlagKey) }
     }
 
-    /// Whether optional pop-up window tracking is on — non-activating panels
-    /// of any app: iTerm hotkey window, Spotlight, Raycast, 1Password Quick
-    /// Access, and whatever ships tomorrow. This is the persisted *intent*:
-    /// it may be true while Input Monitoring is still missing — the tap only
-    /// runs once the permission is granted.
-    var trackPopUps: Bool {
+    /// Whether optional extra-window tracking is on — non-activating panels of
+    /// any app: iTerm hotkey window, Spotlight, Raycast, 1Password Quick
+    /// Access, and whatever ships tomorrow. This is the persisted *intent*: it
+    /// may be true while the detector's permission is still missing — the
+    /// detector only runs once the permission is granted. Entirely dormant on a
+    /// build that injects no detector (`supportsExtraTracking == false`).
+    var trackExtraWindows: Bool {
         didSet {
-            defaults.set(trackPopUps, forKey: Self.trackPopUpsKey)
-            updateEventTap()
-            if !trackPopUps {
-                // Drop a possible pop-up context so later source changes are
+            defaults.set(trackExtraWindows, forKey: Self.trackExtraWindowsKey)
+            updateDetector()
+            if !trackExtraWindows {
+                // Drop a possible detected context so later source changes are
                 // attributed to the real frontmost app again.
                 seedFrontmostApp()
             }
         }
     }
 
-    enum PopUpToggleOutcome {
+    enum ExtraTrackingOutcome {
         case enabled, disabled, permissionRequired
     }
 
     private let store: MappingStore
     private let inputSources: InputSourceClient
-    private let eventTap: EventTapClient?
+    /// Supplementary activation detector (event tap / AX focus). `nil` on builds
+    /// that rely only on `NSWorkspace` activation — the whole extra-tracking
+    /// apparatus below then stays dormant.
+    private let detector: ActivationDetector?
     private let defaults: UserDefaults
     private let ownBundleID: String?
     private let frontmostProvider: () -> String?
@@ -97,6 +113,10 @@ final class SwitchController {
 
     private var frontmostBundleID: String?
     private(set) var restoreTask: Task<Void, Never>?
+    /// Deferred recording of a manual source change (see `settleDelay`).
+    /// Cancelled on app activation: once the frontmost app changes, the
+    /// pending read could observe the next app's restored source instead.
+    private(set) var recordTask: Task<Void, Never>?
     /// Our own recent programmatic switch: change notifications matching this
     /// source inside the deadline are ours and must not be recorded. Passive
     /// expiry (no clearing) avoids any clear-too-early race with the
@@ -115,7 +135,7 @@ final class SwitchController {
     init(
         store: MappingStore,
         inputSources: InputSourceClient,
-        eventTap: EventTapClient? = nil,
+        detector: ActivationDetector? = nil,
         defaults: UserDefaults = .standard,
         ownBundleID: String? = Bundle.main.bundleIdentifier,
         frontmostProvider: @escaping () -> String? = {
@@ -124,7 +144,7 @@ final class SwitchController {
     ) {
         self.store = store
         self.inputSources = inputSources
-        self.eventTap = eventTap
+        self.detector = detector
         self.defaults = defaults
         self.ownBundleID = ownBundleID
         self.frontmostProvider = frontmostProvider
@@ -134,7 +154,7 @@ final class SwitchController {
             : defaults.bool(forKey: Self.isEnabledKey)
         self.defaultSourceID = defaults.string(forKey: Self.defaultSourceIDKey)
         self.showFlag = defaults.bool(forKey: Self.showFlagKey)
-        self.trackPopUps = defaults.bool(forKey: Self.trackPopUpsKey)
+        self.trackExtraWindows = defaults.bool(forKey: Self.trackExtraWindowsKey)
     }
 
     /// Enabled, select-capable keyboard input sources for the default-language
@@ -191,43 +211,51 @@ final class SwitchController {
         // nor record (must not overwrite a stored preference).
         seedFrontmostApp()
 
-        updateEventTap()
+        updateDetector()
     }
 
-    /// Flips pop-up tracking. `.permissionRequired` means the intent was
-    /// stored and the system prompt was requested, but Input Monitoring is
-    /// not granted yet — the caller should route the user to System Settings.
-    func toggleTrackPopUps() -> PopUpToggleOutcome {
-        guard !trackPopUps else {
-            trackPopUps = false
+    // MARK: - Extra-window tracking (dormant when no detector is injected)
+
+    /// Whether a detector is available at all. Drives whether the menu offers
+    /// the toggle: builds that rely only on `NSWorkspace` activation hide it.
+    var supportsExtraTracking: Bool { detector != nil }
+
+    /// Menu title / permission deep-link supplied by the injected detector, so
+    /// the menu code stays mechanism-neutral across builds.
+    var extraTrackingTitle: String? { detector?.menuTitle }
+    var extraTrackingSettingsURL: URL? { detector?.settingsURL }
+
+    /// Whether the detector is actually delivering — false while its permission
+    /// is still missing, which the menu renders as a mixed state.
+    var extraTrackingActive: Bool { detector?.isActive ?? false }
+
+    /// Flips extra-window tracking. `.permissionRequired` means the intent was
+    /// stored and the system prompt was requested, but the permission is not
+    /// granted yet — the caller should route the user to System Settings.
+    func toggleExtraTracking() -> ExtraTrackingOutcome {
+        guard !trackExtraWindows else {
+            trackExtraWindows = false
             return .disabled
         }
-        trackPopUps = true
-        guard let eventTap, !eventTap.permissionGranted() else { return .enabled }
-        eventTap.requestPermission()
+        trackExtraWindows = true
+        guard let detector, !detector.permissionGranted() else { return .enabled }
+        detector.requestPermission()
         return .permissionRequired
     }
 
-    /// Whether the tap is actually delivering — false while the permission
-    /// is still missing, which the menu renders as a mixed state.
-    var popUpTrackingActive: Bool {
-        eventTap?.isRunning ?? false
+    /// Re-evaluates whether the detector should run. Safe to call any time;
+    /// used when the menu opens to pick up a permission granted in Settings.
+    func refreshExtraTracking() {
+        updateDetector()
     }
 
-    /// Re-evaluates whether the tap should run. Safe to call any time; used
-    /// when the menu opens to pick up a permission granted in Settings.
-    func refreshPopUpTracking() {
-        updateEventTap()
-    }
-
-    /// An input event was routed to `bundleID` (the annotated target of a
-    /// keyboard/click/flags event). Any target can take the tracked context —
-    /// that is what makes arbitrary apps' pop-ups work with no per-app list —
-    /// except transient system surfaces, which are ignored to avoid layout
-    /// churn. Leaving a pop-up needs no special case: the next event simply
-    /// targets the app underneath.
-    func handleEventTarget(bundleID: String?) {
-        guard isEnabled, trackPopUps, !isScreenLocked else { return }
+    /// An input event / focus change was routed to `bundleID` (the detector's
+    /// resolved target). Any target can take the tracked context — that is what
+    /// makes arbitrary apps' pop-ups work with no per-app list — except the
+    /// transient system surfaces in `systemUIBundleIDs`. Leaving a pop-up needs
+    /// no special case: the next signal simply targets the app underneath.
+    func handleDetectedActivation(bundleID: String?) {
+        guard isEnabled, trackExtraWindows, !isScreenLocked else { return }
         guard let bundleID, bundleID != ownBundleID, bundleID != frontmostBundleID else {
             return
         }
@@ -242,6 +270,7 @@ final class SwitchController {
         guard bundleID != ownBundleID else { return }
 
         restoreTask?.cancel()
+        recordTask?.cancel()
 
         // Switch-away snapshot: capture the outgoing app's source in case its
         // change notification was late or swallowed by the suppression window.
@@ -284,6 +313,21 @@ final class SwitchController {
     func handleSourceChange() {
         guard isEnabled, !isScreenLocked else { return }
         guard let bundleID = frontmostBundleID else { return }
+        recordTask?.cancel()
+        recordTask = Task {
+            await recordSettledSource(for: bundleID)
+        }
+    }
+
+    /// Reads the current source only after `settleDelay` so a stale
+    /// notification-time value is never recorded, then applies the same
+    /// suppression / attribution rules as before.
+    private func recordSettledSource(for bundleID: String) async {
+        try? await Task.sleep(for: Self.settleDelay)
+        guard !Task.isCancelled, isEnabled, !isScreenLocked else { return }
+        // Frontmost changed mid-delay: the switch-away snapshot in
+        // handleActivation already captured the outgoing app.
+        guard frontmostBundleID == bundleID else { return }
         guard let current = inputSources.currentSourceID() else { return }
         if let suppression,
            suppression.sourceID == current,
@@ -301,7 +345,7 @@ final class SwitchController {
 
     func handleScreenLockChange(locked: Bool) {
         isScreenLocked = locked
-        updateEventTap()
+        updateDetector()
         if !locked {
             // The login window may have switched the source; re-baseline so
             // its changes are not attributed to the frontmost app.
@@ -309,14 +353,16 @@ final class SwitchController {
         }
     }
 
-    private func updateEventTap() {
-        guard let eventTap else { return }
-        if isEnabled && trackPopUps && !isScreenLocked && eventTap.permissionGranted() {
-            _ = eventTap.start { [weak self] bundleID in
-                self?.handleEventTarget(bundleID: bundleID)
+    /// Starts or stops the injected detector to match the current intent.
+    /// No-op when no detector is injected. Safe to call repeatedly.
+    private func updateDetector() {
+        guard let detector else { return }
+        if isEnabled && trackExtraWindows && !isScreenLocked && detector.permissionGranted() {
+            _ = detector.start { [weak self] bundleID in
+                self?.handleDetectedActivation(bundleID: bundleID)
             }
         } else {
-            eventTap.stop()
+            detector.stop()
         }
     }
 

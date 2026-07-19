@@ -33,10 +33,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem?
     private var sourceChangeObserver: NSObjectProtocol?
+    private var appActivationObserver: NSObjectProtocol?
+    private var labelRecheckTask: Task<Void, Never>?
+    /// Style + text of the last rendered label, to skip identical repaints
+    /// (the re-check cascade and the activation hook mostly confirm an
+    /// unchanged source).
+    private var renderedLabelKey: String?
     private let controller = SwitchController(
         store: MappingStore(defaults: .standard),
-        inputSources: SystemInputSourceClient(),
-        eventTap: SystemEventTapClient()
+        inputSources: AppComposition.makeInputSourceClient(),
+        detector: AppComposition.makeActivationDetector()
     )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -62,6 +68,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.updateStatusAppearance()
+                self?.scheduleLabelRecheck()
+            }
+        }
+
+        // A window switch settles the TIS value, so repainting here heals a
+        // label that went stale while no further change notifications arrived.
+        appActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.updateStatusAppearance()
+            }
+        }
+    }
+
+    /// Immediately after the change notification `TISCopyCurrentKeyboardInputSource`
+    /// can still return the *previous* source — the process-local value settles
+    /// asynchronously, which showed up in the field as a label permanently one
+    /// switch behind. Re-read shortly after (and once more as a safety net) so
+    /// a stale first paint self-corrects.
+    private func scheduleLabelRecheck() {
+        labelRecheckTask?.cancel()
+        labelRecheckTask = Task { [weak self] in
+            for delay: Duration in [.milliseconds(150), .milliseconds(1000)] {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled else { return }
+                self?.updateStatusAppearance()
             }
         }
     }
@@ -73,9 +106,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem?.button else { return }
         let scaledSize = NSFont.menuBarFont(ofSize: 0).pointSize * Self.labelScale
         let style: MenuBarStyle = controller.showFlag ? .flag : .code
+        let label = MenuBarLabel.text(languageCode: controller.currentSourceLanguageCode(),
+                                      style: style)
+        let key = "\(style)|\(label ?? "-")"
+        guard key != renderedLabelKey else { return }
+        renderedLabelKey = key
         button.title = ""
-        if let label = MenuBarLabel.text(languageCode: controller.currentSourceLanguageCode(),
-                                         style: style) {
+        if let label {
             // Render into a vertically centered image: setting it as the button
             // title aligns emoji on the text baseline (visibly off-center),
             // whereas NSStatusItem centers an image cleanly.
@@ -126,22 +163,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.isEnabled.toggle()
     }
 
-    @objc private func toggleTrackPopUps() {
-        if controller.toggleTrackPopUps() == .permissionRequired {
-            // The system prompt (when TCC still shows one) points to the same
-            // pane; opening it directly also covers re-enabling after an
-            // earlier denial, when macOS no longer prompts.
-            openInputMonitoringSettings()
+    @objc private func toggleExtraTracking() {
+        // `.permissionRequired`: the intent is stored but the detector's
+        // permission is still missing. Route to the relevant System Settings
+        // pane (this also covers re-enabling after an earlier denial, when
+        // macOS no longer shows a prompt).
+        if controller.toggleExtraTracking() == .permissionRequired,
+           let url = controller.extraTrackingSettingsURL {
+            NSWorkspace.shared.open(url)
         }
-    }
-
-    private func openInputMonitoringSettings() {
-        guard let url = URL(string:
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
-        ) else {
-            return
-        }
-        NSWorkspace.shared.open(url)
     }
 
     @objc private func openKeyboardSettings() {
@@ -198,17 +228,21 @@ extension AppDelegate: NSMenuDelegate {
         enabled.state = controller.isEnabled ? .on : .off
         menu.addItem(enabled)
 
-        // Re-check on every menu open so a permission granted in System
-        // Settings since the last look starts the tap without a relaunch
-        // attempt. .mixed = enabled but still waiting for Input Monitoring.
-        controller.refreshPopUpTracking()
-        let trackPopUps = NSMenuItem(title: "Track Pop-up Windows",
-                                     action: #selector(toggleTrackPopUps), keyEquivalent: "")
-        trackPopUps.target = self
-        trackPopUps.state = controller.trackPopUps
-            ? (controller.popUpTrackingActive ? .on : .mixed)
-            : .off
-        menu.addItem(trackPopUps)
+        // Optional extra-window tracking, shown only on builds that inject a
+        // detector (hidden on the App Store build). Re-check on every menu open
+        // so a permission granted in System Settings since the last look starts
+        // the detector without a relaunch. .mixed = enabled but still waiting
+        // for the permission.
+        if controller.supportsExtraTracking {
+            controller.refreshExtraTracking()
+            let track = NSMenuItem(title: controller.extraTrackingTitle ?? "Track Windows",
+                                   action: #selector(toggleExtraTracking), keyEquivalent: "")
+            track.target = self
+            track.state = controller.trackExtraWindows
+                ? (controller.extraTrackingActive ? .on : .mixed)
+                : .off
+            menu.addItem(track)
+        }
 
         let showFlag = NSMenuItem(title: "Show Flag",
                                   action: #selector(toggleShowFlag), keyEquivalent: "")

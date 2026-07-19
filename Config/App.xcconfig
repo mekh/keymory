@@ -1,0 +1,22 @@
+// App.xcconfig — per-branch app build configuration for the Keymory app target.
+//
+// These settings are extracted from project.pbxproj on purpose: they either
+// drift on every release (version numbers) or differ per branch (sandbox,
+// signing team). Keeping them here means project.pbxproj — including the
+// baseConfigurationReference that points at this file — stays byte-identical
+// across the shared-core, pop-up-tracking, and personal branches, so a
+// business-logic fix propagates with zero project-file conflicts. Only the
+// VALUES below differ per branch.
+
+// Release versioning. Bumped every release; editing this line no longer
+// touches the shared project file.
+CURRENT_PROJECT_VERSION = 3
+MARKETING_VERSION = 1.0
+
+// Code signing. The App Store distribution team (shared-core / pop-up builds).
+// The personal build may clear or override this.
+DEVELOPMENT_TEAM = RT7WS95PK2
+
+// App Sandbox. ON for the App Store builds (shared-core, pop-up tracking).
+// The non-sandboxed personal build overrides this to NO.
+ENABLE_APP_SANDBOX = YES

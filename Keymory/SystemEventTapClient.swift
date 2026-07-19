@@ -1,58 +1,41 @@
 //
-//  EventTapClient.swift
+//  SystemEventTapClient.swift
 //  Keymory
 //
 
 import AppKit
 
-/// Abstraction over the Input Monitoring permission and the listen-only
-/// event tap used for pop-up window tracking, so the state machine can be
-/// unit-tested with a mock.
-@MainActor
-protocol EventTapClient: AnyObject {
-    /// Whether the tap is currently installed and delivering events.
-    var isRunning: Bool { get }
-
-    /// Whether Input Monitoring is granted. Cheap; safe to poll.
-    func permissionGranted() -> Bool
-
-    /// Shows the system Input Monitoring prompt when TCC still allows one.
-    /// Returns the (unlikely) immediately-granted state; the real grant
-    /// happens in System Settings and takes effect after an app relaunch.
-    @discardableResult
-    func requestPermission() -> Bool
-
-    /// Installs the tap. `onEvent` receives the bundle id of the process
-    /// each keyboard/click event is routed to (nil when unresolvable), only
-    /// when it differs from the previous event's target. Returns false when
-    /// the tap cannot be created (permission missing).
-    func start(onEvent: @escaping (String?) -> Void) -> Bool
-
-    func stop()
-}
-
-/// Real implementation; the only file that touches CGEventTap.
+/// `ActivationDetector` backed by a listen-only `CGEventTap`. This is the
+/// pop-up-tracking build's detector; the only file here that touches
+/// CGEventTap. The protocol lives in the shared `ActivationDetector.swift`.
 ///
-/// The tap sits at `kCGAnnotatedSessionEventTap` — the point where the
-/// window server has already annotated each event with the process it is
-/// routed to (`kCGEventTargetUnixProcessID`). That annotation is what makes
-/// non-activating panels (iTerm hotkey window, Spotlight, Raycast) visible:
-/// their key events target the panel's owner while `frontmostApplication`
-/// still reports the previous app. Verified empirically inside the sandbox
-/// on macOS 26 (2026-07-18).
+/// The tap sits at `kCGAnnotatedSessionEventTap` — the point where the window
+/// server has already annotated each event with the process it is routed to
+/// (`kCGEventTargetUnixProcessID`). That annotation is what makes non-activating
+/// panels (iTerm hotkey window, Spotlight, Raycast) visible: their key events
+/// target the panel's owner while `frontmostApplication` still reports the
+/// previous app. Verified empirically inside the sandbox on macOS 26.
 ///
 /// Privacy: the tap is listen-only and reads a single integer field — the
-/// target pid. Key codes and characters are never inspected.
+/// target pid. Key codes and characters are never inspected. Filtering of
+/// transient system surfaces (Dock, Control Center, …) is handled centrally by
+/// `SwitchController`, so this detector reports every resolved target.
 @MainActor
-final class SystemEventTapClient: EventTapClient {
+final class SystemEventTapClient: ActivationDetector {
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
-    private var onEvent: ((String?) -> Void)?
+    private var onActivation: ((String?) -> Void)?
     /// Target pid of the most recent event: the callback fires per keystroke
     /// and click, so downstream work is gated on the target changing.
     private var lastPID: pid_t = -1
 
-    var isRunning: Bool { tap != nil }
+    var isActive: Bool { tap != nil }
+
+    var menuTitle: String { "Track Pop-up Windows" }
+
+    var settingsURL: URL? {
+        URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+    }
 
     func permissionGranted() -> Bool {
         CGPreflightListenEventAccess()
@@ -63,8 +46,8 @@ final class SystemEventTapClient: EventTapClient {
         CGRequestListenEventAccess()
     }
 
-    func start(onEvent: @escaping (String?) -> Void) -> Bool {
-        self.onEvent = onEvent
+    func start(onActivation: @escaping (String?) -> Void) -> Bool {
+        self.onActivation = onActivation
         guard tap == nil else { return true }
         lastPID = -1
 
@@ -95,7 +78,7 @@ final class SystemEventTapClient: EventTapClient {
             },
             userInfo: refcon)
         else {
-            self.onEvent = nil
+            self.onActivation = nil
             return false
         }
 
@@ -108,7 +91,7 @@ final class SystemEventTapClient: EventTapClient {
     }
 
     func stop() {
-        onEvent = nil
+        onActivation = nil
         lastPID = -1
         if let source {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
@@ -132,6 +115,6 @@ final class SystemEventTapClient: EventTapClient {
         let pid = pid_t(event.getIntegerValueField(.eventTargetUnixProcessID))
         guard pid != lastPID else { return }
         lastPID = pid
-        onEvent?(NSRunningApplication(processIdentifier: pid)?.bundleIdentifier)
+        onActivation?(NSRunningApplication(processIdentifier: pid)?.bundleIdentifier)
     }
 }
