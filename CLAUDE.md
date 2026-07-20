@@ -318,3 +318,14 @@ test-target configs stay identical across branches.
   **proactively** — the layout switches before the first keystroke, no click needed. (The
   sandboxed `popup-window-tracking` build covers the same panels via an event tap but can
   only react to the first event; shared-core does not cover them at all.)
+- The macOS **system** input-source flag near the text cursor (macOS 14+,
+  `CursorUIViewService`, the "redesigned text cursor") can briefly show the **previous**
+  layout right after Keymory switches — the system reads TIS before it settles (same lag
+  as the menu-bar label / `handleSourceChange` settle delay). Purely cosmetic; the actual
+  input source is correct. **No public (or usable private) API** to intercept, suppress,
+  or repaint it (verified 2026-07-20). A custom-overlay approach (à la Input Source Pro)
+  was **rejected**: it can't hide the system flag, so it would need the user to disable the
+  macOS indicator anyway, and caret-exact positioning is unreliable in AX-silent apps.
+  README documents the user-side mitigations: disable "Automatically switch to a document's
+  input source", and optionally
+  `defaults write kCFPreferencesAnyApplication TSMLanguageIndicatorEnabled -bool false`.

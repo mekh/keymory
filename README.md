@@ -170,6 +170,29 @@ Keymory is honest about the edges:
 - A few apps that manage their own text input (some Electron/terminal/Java apps) may occasionally ignore a system-level switch. Rare, and on the roadmap.
 - Non-activating pop-ups (iTerm hotkey terminal, Spotlight, Raycast, …) are handled by **Track All Windows** — the language switches before you type. With that option off, a change made in such a window is attributed to the previous app and self-corrects next time you type.
 - Complex IME languages (Chinese/Japanese/Korean) are not the focus of this version — Latin/Cyrillic layouts are first-class today.
+- **The little language flag macOS pops up by your cursor is macOS's own — and it can lie.** When the layout changes, macOS draws its built-in input-source indicator next to the text cursor. A timing quirk in macOS means it sometimes reads the language a beat too early and flashes the *previous* flag — even though Keymory has already switched you to the correct one. It's purely cosmetic; what you type is right. macOS gives apps no way to correct or hide this indicator, so Keymory can't repaint it — but you can quiet it yourself (see *Quieting the macOS language flag* just below).
+
+## 🎌 Quieting the macOS language flag
+
+macOS 14+ shows a small input-source flag next to your text cursor whenever the layout changes. It's drawn by macOS itself — Keymory can neither style it nor turn it off. Two tweaks make it behave:
+
+1. **Turn off "Automatically switch to a document's input source."** In System Settings ▸ Keyboard ▸ Input Sources ▸ **Edit…**, switch this off. It's macOS's own half-working per-document switcher; with Keymory doing the job, leaving it on only creates a second, competing switch (and an extra flag). Recommended for every Keymory user.
+
+2. **Optionally hide the near-cursor flag.** If the flash still bothers you, move it back to the old center-screen popup:
+
+   ```sh
+   defaults write kCFPreferencesAnyApplication TSMLanguageIndicatorEnabled -bool false
+   ```
+
+   Log out and back in (or restart) for it to take effect. To restore the default:
+
+   ```sh
+   defaults delete kCFPreferencesAnyApplication TSMLanguageIndicatorEnabled
+   ```
+
+   A more aggressive, **unsupported** tweak (the `redesigned_text_cursor` FeatureFlag, which needs `sudo` + reboot) can remove the indicator entirely, but it also disables the Caps Lock / dictation cursor indicators and can hide the text caret in some apps — not recommended.
+
+Keymory always switches to the correct language; these settings only change macOS's own on-screen flag, never what you actually type.
 
 ## 🤝 Contributing
 
