@@ -19,6 +19,28 @@
 
 ---
 
+## 📥 Get Keymory
+
+Keymory comes in two builds — pick the one that suits you:
+
+| | **Mac App Store** | **Homebrew / direct download** |
+| --- | --- | --- |
+| App Sandbox | ✅ Sandboxed | Off (direct build) |
+| **Track All Windows** ¹ | — | ✅ |
+| Permissions | None | Accessibility *(optional)* |
+| Updates | Automatic | `brew upgrade` or manual |
+
+¹ Switches the input language in pop-up windows that never activate their app — iTerm's hotkey terminal, Spotlight, Raycast, Alfred, 1Password Quick Access — **before you type**.
+
+- 🛍️ **Mac App Store** — the sandboxed build: zero setup, auto-updating, asks for nothing. *(Link coming once it clears App Store review.)*
+- 🍺 **Homebrew / self-install** — the full, non-sandboxed build with **Track All Windows**:
+
+  ```sh
+  brew install --cask mekh/keymory/keymory
+  ```
+
+  Prefer to install by hand, or want the full privacy write-up and the notarized download? It all lives in the dedicated tap repo → **[github.com/mekh/homebrew-keymory](https://github.com/mekh/homebrew-keymory)**
+
 ## 😩 The problem you've stopped noticing
 
 You live in more than one language. Your browser is English. Your code editor is your mother tongue. Your terminal is English, your messenger is not. And macOS? macOS keeps **one** global input language and expects *you* to babysit it.
@@ -76,9 +98,9 @@ Set it once by just *using* your Mac the way you already do. From then on, the r
 | **Forget All** | Wipe the memory and start fresh. |
 | **Quit Keymory** | Quit the app. |
 
-## 📦 Install
+## 🛠️ Build from source
 
-Keymory is currently built from source (a signed release is on the roadmap).
+Want to build Keymory yourself instead of downloading it? Clone and build:
 
 ```bash
 git clone git@github.com:mekh/keymory.git
@@ -124,10 +146,6 @@ Keymory is honest about the edges:
 ## 🤝 Contributing
 
 Keymory focuses on Latin and Cyrillic layouts today. **If your language or input method isn't supported well — CJK/IME (Chinese, Japanese, Korean), or anything else — your PR is highly welcome!** The switch logic has a verify/retry seam in `SwitchController.restore(...)` that's the natural place to plug in IME-specific handling.
-
-## 🗺️ Roadmap
-
-- Signed & notarized release + Homebrew cask
 
 ## 📄 License
 
