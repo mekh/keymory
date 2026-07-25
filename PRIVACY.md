@@ -37,7 +37,7 @@ When — and only when — this option is enabled, Keymory installs a **listen-o
 - Keymory **never reads key codes or characters** — it cannot see what you type, only which app you are typing into.
 - Nothing from the event stream is stored or transmitted; the target app identifier is compared in memory and discarded.
 - Turning the option off (or quitting Keymory) removes the event tap entirely.
-- The implementation is open source and auditable: [`Keymory/EventTapClient.swift`](https://github.com/mekh/keymory/blob/main/Keymory/EventTapClient.swift).
+- The implementation is open source and auditable: [`Keymory/SystemEventTapClient.swift`](https://github.com/mekh/keymory/blob/main/Keymory/SystemEventTapClient.swift).
 
 ## Children
 

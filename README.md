@@ -26,13 +26,15 @@ Keymory comes in two builds — pick the one that suits you:
 | | **Mac App Store** | **Homebrew / direct download** |
 | --- | --- | --- |
 | App Sandbox | ✅ Sandboxed | Off (direct build) |
-| **Track All Windows** ¹ | — | ✅ |
-| Permissions | None | Accessibility *(optional)* |
+| Pop-up window tracking ¹ | ✅ **Track Pop-up Windows** | ✅ **Track All Windows** |
+| …switches the language | on your first keystroke or click ² | **before you type**, every time |
+| Optional permission | Input Monitoring | Accessibility |
 | Updates | Automatic | `brew upgrade` or manual |
 
-¹ Switches the input language in pop-up windows that never activate their app — iTerm's hotkey terminal, Spotlight, Raycast, Alfred, 1Password Quick Access — **before you type**.
+¹ Follows keyboard focus into windows that never activate their app — iTerm's hotkey terminal, Spotlight, Raycast, Alfred, 1Password Quick Access. Both builds cover them; they differ in *when* the switch lands and *which* permission it uses.
+² Modifier-based hotkeys (⌥Space) still switch before you type; only a bare-key hotkey (plain F12) lets the very first character land in the old layout, then corrects — see "A tip for pop-up hotkeys" below.
 
-- 🛍️ **Mac App Store** — the sandboxed build: zero setup, auto-updating, asks for nothing. *(Link coming once it clears App Store review.)*
+- 🛍️ **Mac App Store** — the sandboxed build: zero setup, auto-updating, no permissions for everyday use (only the optional **Track Pop-up Windows** asks for Input Monitoring). *(Link coming once it clears App Store review.)*
 - 🍺 **Homebrew / self-install** — the full, non-sandboxed build with **Track All Windows**:
 
   ```sh
@@ -123,7 +125,7 @@ once). Here is the honest fine print about what that means in Keymory:
   cannot tell *what* you type — only *which app* you are typing into.
 - The tap exists only while the option is on; toggle it off and the tap is gone.
 - It's open source — the only file touching the event tap is
-  [`Keymory/EventTapClient.swift`](Keymory/EventTapClient.swift), short enough
+  [`Keymory/SystemEventTapClient.swift`](Keymory/SystemEventTapClient.swift), short enough
   to audit over coffee.
 
 ## 🎹 A tip for pop-up hotkeys: the first letter
