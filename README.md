@@ -34,7 +34,7 @@ Keymory comes in two builds — pick the one that suits you:
 ¹ Follows keyboard focus into windows that never activate their app — iTerm's hotkey terminal, Spotlight, Raycast, Alfred, 1Password Quick Access. Both builds cover them; they differ in *when* the switch lands and *which* permission it uses.
 ² Modifier-based hotkeys (⌥Space) still switch before you type; only a bare-key hotkey (plain F12) lets the very first character land in the old layout, then corrects — see "A tip for pop-up hotkeys" below.
 
-- 🛍️ **Mac App Store** — the sandboxed build: zero setup, auto-updating, no permissions for everyday use (only the optional **Track Pop-up Windows** asks for Input Monitoring). *(Link coming once it clears App Store review.)*
+- 🛍️ **Mac App Store** — the sandboxed build: zero setup, auto-updating, no permissions for everyday use (only the optional **Track Pop-up Windows** asks for Input Monitoring).
 - 🍺 **Homebrew / self-install** — the full, non-sandboxed build with **Track All Windows**:
 
   ```sh
@@ -149,6 +149,16 @@ app's own preferences.
 This isn't specific to any one app — it works the same way for any app's
 pop-up window. iTerm's hotkey terminal and Spotlight are just the everyday
 examples.
+
+**In short — the App Store build and pop-ups:** Keymory switches the instant it
+sees your first event in the pop-up, so a **mouse click into the pop-up switches
+the language before you type** — as does a modifier-based hotkey (⌘ Space, ⌥ F12).
+Only a bare-key hotkey (a plain F12) can let the very first character land in the
+previous app's layout. So with the sandboxed App Store build you either **click
+into the window first**, or accept that the first letter may come out in the
+previous layout. Prefer neither? The non-sandboxed **Homebrew build** uses the
+Accessibility API to switch **before the first keystroke** in every window, with
+no click — that is exactly what it is for.
 
 ## 🛠️ Build from source
 
