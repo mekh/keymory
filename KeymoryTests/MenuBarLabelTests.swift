@@ -32,4 +32,16 @@ final class MenuBarLabelTests: XCTestCase {
         XCTAssertNil(MenuBarLabel.text(languageCode: nil, style: .code))
         XCTAssertNil(MenuBarLabel.text(languageCode: "", style: .flag))
     }
+
+    func testFlagReturnsCountryFlagForLanguage() {
+        XCTAssertEqual(MenuBarLabel.flag(languageCode: "en"), "🇺🇸")
+        XCTAssertEqual(MenuBarLabel.flag(languageCode: "uk"), "🇺🇦")
+        XCTAssertEqual(MenuBarLabel.flag(languageCode: "he"), "🇮🇱")
+        XCTAssertEqual(MenuBarLabel.flag(languageCode: "fr"), "🇫🇷")
+    }
+
+    func testFlagReturnsNilForMissingLanguage() {
+        XCTAssertNil(MenuBarLabel.flag(languageCode: nil))
+        XCTAssertNil(MenuBarLabel.flag(languageCode: ""))
+    }
 }
