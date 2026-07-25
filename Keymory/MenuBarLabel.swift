@@ -29,6 +29,16 @@ enum MenuBarLabel {
         "uk": "UA",
     ]
 
+    /// The country flag emoji for a language, e.g. "🇺🇸", "🇺🇦", used to prefix a
+    /// layout name in the quick-switch list. `nil` when the language is missing
+    /// or resolves to no flag, so the caller shows the name alone.
+    static func flag(languageCode: String?) -> String? {
+        guard let raw = languageCode?.lowercased(), !raw.isEmpty else { return nil }
+        let lang = String(raw.prefix(2))
+        let region = flagRegionByLanguage[lang] ?? lang.uppercased()
+        return flagEmoji(region: region)
+    }
+
     /// The text to place in the menu bar, or `nil` if `languageCode` is missing
     /// (the caller then falls back to a keyboard glyph).
     static func text(languageCode: String?, style: MenuBarStyle) -> String? {

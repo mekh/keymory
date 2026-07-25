@@ -5,10 +5,15 @@
 
 import Carbon
 
-/// An input source that can be picked as the default language.
+/// An input source shown in the menu — pickable as the default language and in
+/// the top-level quick-switch list.
 struct InputSourceInfo: Equatable {
     let id: String
     let name: String
+    /// Primary language code (e.g. "en", "uk"), used to render the flag that
+    /// prefixes the name in the quick-switch list. `nil` when the source
+    /// declares none.
+    let languageCode: String?
 }
 
 /// Abstraction over the Text Input Source Services (TIS) API so the state
@@ -74,7 +79,8 @@ struct SystemInputSourceClient: InputSourceClient {
                 return nil
             }
             let name = stringProperty(kTISPropertyLocalizedName, of: source) ?? id
-            return InputSourceInfo(id: id, name: name)
+            let languageCode = languagesProperty(of: source).first
+            return InputSourceInfo(id: id, name: name, languageCode: languageCode)
         }
         var seen = Set<String>()
         return sources

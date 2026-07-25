@@ -196,6 +196,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.defaultSourceID = sender.representedObject as? String
     }
 
+    @objc private func selectInputSource(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        controller.selectInputSource(id: id)
+    }
+
     @objc private func toggleLaunchAtLogin() {
         do {
             if SMAppService.mainApp.status == .enabled {
@@ -209,7 +214,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func forgetAll() {
-        controller.forgetAll()
+        let alert = NSAlert()
+        alert.messageText = "Forget all remembered layouts?"
+        alert.informativeText =
+            "This permanently erases every app's remembered keyboard layout. "
+            + "Keymory will start learning from scratch, and it can't be undone."
+        alert.alertStyle = .warning
+        let confirm = alert.addButton(withTitle: "Confirm")
+        confirm.hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        // A menu-bar (accessory) app is not active, so its modal alert can open
+        // behind the frontmost app — activate so the confirmation comes forward.
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            controller.forgetAll()
+        }
     }
 
     @objc private func quit() {
@@ -222,17 +241,68 @@ extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
+        // Quick-switch list of the system's enabled keyboard layouts at the top
+        // of the menu, like the macOS input menu. Each row is the flag followed
+        // by the source's localized name — the same name shown under Settings ▸
+        // Default Language (🇺🇸 ABC, 🇺🇦 Ukrainian) — dropping the flag when the
+        // language resolves to none. Clicking one switches the source
+        // immediately; as a manual change it is then remembered for the
+        // frontmost app. The active source is checkmarked.
+        let sources = controller.availableInputSources()
+        let currentSource = controller.currentSourceID()
+        for source in sources {
+            let flag = MenuBarLabel.flag(languageCode: source.languageCode)
+            let title = flag.map { "\($0) \(source.name)" } ?? source.name
+            let item = NSMenuItem(title: title,
+                                  action: #selector(selectInputSource(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = source.id
+            item.state = source.id == currentSource ? .on : .off
+            menu.addItem(item)
+        }
+
+        // Directly under the layout list, echoing the system input menu's link
+        // out to Keyboard settings.
+        let keyboardSettings = NSMenuItem(title: "Open Keyboard Settings…",
+                                          action: #selector(openKeyboardSettings), keyEquivalent: "")
+        keyboardSettings.target = self
+        menu.addItem(keyboardSettings)
+
+        menu.addItem(.separator())
+
+        // Every configuration item — toggles, Default Language, the memory count
+        // and Forget All — lives under Settings so the top level stays a clean
+        // layout switcher.
+        let settings = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
+        settings.submenu = makeSettingsSubmenu()
+        menu.addItem(settings)
+
+        menu.addItem(.separator())
+
+        let quit = NSMenuItem(title: "Quit Keymory",
+                              action: #selector(quit), keyEquivalent: "q")
+        quit.target = self
+        menu.addItem(quit)
+    }
+
+    // Every configuration item, gathered so the top level stays a clean layout
+    // switcher: the toggles, the nested Default Language submenu, and the memory
+    // count + Forget All at the bottom. Rebuilt with the main menu, so all
+    // states are current on each open.
+    private func makeSettingsSubmenu() -> NSMenu {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+
         let enabled = NSMenuItem(title: "Enabled",
                                  action: #selector(toggleEnabled), keyEquivalent: "")
         enabled.target = self
         enabled.state = controller.isEnabled ? .on : .off
-        menu.addItem(enabled)
+        submenu.addItem(enabled)
 
         // Optional extra-window tracking, shown only on builds that inject a
-        // detector (hidden on the App Store build). Re-check on every menu open
-        // so a permission granted in System Settings since the last look starts
-        // the detector without a relaunch. .mixed = enabled but still waiting
-        // for the permission.
+        // detector. Re-check on every menu open so a permission granted in
+        // System Settings since the last look starts the detector without a
+        // relaunch. .mixed = enabled but still waiting for the permission.
         if controller.supportsExtraTracking {
             controller.refreshExtraTracking()
             let track = NSMenuItem(title: controller.extraTrackingTitle ?? "Track Windows",
@@ -241,57 +311,50 @@ extension AppDelegate: NSMenuDelegate {
             track.state = controller.trackExtraWindows
                 ? (controller.extraTrackingActive ? .on : .mixed)
                 : .off
-            menu.addItem(track)
+            submenu.addItem(track)
         }
 
         let showFlag = NSMenuItem(title: "Show Flag",
                                   action: #selector(toggleShowFlag), keyEquivalent: "")
         showFlag.target = self
         showFlag.state = controller.showFlag ? .on : .off
-        menu.addItem(showFlag)
+        submenu.addItem(showFlag)
 
         let launch = NSMenuItem(title: "Launch at Login",
                                 action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launch.target = self
         launch.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        menu.addItem(launch)
+        submenu.addItem(launch)
+
+        submenu.addItem(.separator())
 
         let defaultLanguage = NSMenuItem(title: "Default Language",
                                          action: nil, keyEquivalent: "")
         defaultLanguage.submenu = makeDefaultLanguageSubmenu()
-        menu.addItem(defaultLanguage)
+        submenu.addItem(defaultLanguage)
 
-        let keyboardSettings = NSMenuItem(title: "Open Keyboard Settings…",
-                                          action: #selector(openKeyboardSettings), keyEquivalent: "")
-        keyboardSettings.target = self
-        menu.addItem(keyboardSettings)
-
-        menu.addItem(.separator())
+        submenu.addItem(.separator())
 
         let count = NSMenuItem(title: "Remembering \(controller.mappingCount) apps",
                                action: nil, keyEquivalent: "")
         count.isEnabled = false
-        menu.addItem(count)
+        submenu.addItem(count)
 
-        let forget = NSMenuItem(title: "Forget All",
+        let forget = NSMenuItem(title: "Forget All…",
                                 action: #selector(forgetAll), keyEquivalent: "")
         forget.target = self
         // Destructive action: tint it red (systemRed adapts to light/dark).
         // attributedTitle is required — NSMenuItem.title has no per-item color.
+        // The ellipsis signals that a confirmation dialog follows.
         forget.attributedTitle = NSAttributedString(
-            string: "Forget All",
+            string: "Forget All…",
             attributes: [
                 .foregroundColor: NSColor.systemRed,
                 .font: NSFont.menuFont(ofSize: 0),
             ])
-        menu.addItem(forget)
+        submenu.addItem(forget)
 
-        menu.addItem(.separator())
-
-        let quit = NSMenuItem(title: "Quit Keymory",
-                              action: #selector(quit), keyEquivalent: "q")
-        quit.target = self
-        menu.addItem(quit)
+        return submenu
     }
 
     // The submenu of available input sources. The active default is checkmarked;

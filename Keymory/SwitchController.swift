@@ -173,6 +173,23 @@ final class SwitchController {
         inputSources.currentSourceLanguageCode()
     }
 
+    /// Input source ID of the current keyboard input source, for checkmarking
+    /// the active layout in the menu's quick-switch list.
+    func currentSourceID() -> String? {
+        inputSources.currentSourceID()
+    }
+
+    /// Switches the system keyboard input source in response to a menu click.
+    /// The change posts the TIS notification, so the ordinary `handleSourceChange`
+    /// path records it for the frontmost app — exactly as if the user had
+    /// switched with the system shortcut. Returns false if the layout is no
+    /// longer available. Not gated on `isEnabled`: picking a layout by hand is a
+    /// direct action; only the *recording* of it honors the enabled state.
+    @discardableResult
+    func selectInputSource(id: String) -> Bool {
+        inputSources.selectSource(id: id)
+    }
+
     func start() {
         // Idempotent: guard against a second start() doubling the observers.
         guard !started else { return }

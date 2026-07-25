@@ -191,11 +191,42 @@ final class SwitchControllerTests: XCTestCase {
 
     func testAvailableInputSourcesReflectsClient() {
         mock.sources = [
-            InputSourceInfo(id: "en", name: "ABC"),
-            InputSourceInfo(id: "uk", name: "Ukrainian"),
+            InputSourceInfo(id: "en", name: "ABC", languageCode: "en"),
+            InputSourceInfo(id: "uk", name: "Ukrainian", languageCode: "uk"),
         ]
 
         XCTAssertEqual(controller.availableInputSources(), mock.sources)
+    }
+
+    // MARK: - Menu quick-switch
+
+    func testCurrentSourceIDReflectsClient() {
+        mock.currentID = "uk"
+
+        XCTAssertEqual(controller.currentSourceID(), "uk")
+    }
+
+    func testSelectInputSourceSwitchesAndRecordsForFrontmostApp() async {
+        mock.currentID = "en"
+        controller.handleActivation(bundleID: "app.a")   // frontmost = app.a, adopts en
+
+        // Picking a layout from the menu switches the system source immediately.
+        XCTAssertTrue(controller.selectInputSource(id: "uk"))
+        XCTAssertEqual(mock.selectedIDs, ["uk"])
+        XCTAssertEqual(mock.currentID, "uk")
+
+        // The switch posts the TIS notification, so it is recorded for the
+        // frontmost app exactly like a manual switch.
+        controller.handleSourceChange()
+        await awaitRecord()
+
+        XCTAssertEqual(store.entry(for: "app.a")?.sourceID, "uk")
+    }
+
+    func testSelectInputSourceReportsMissingLayout() {
+        mock.selectSucceeds = false
+
+        XCTAssertFalse(controller.selectInputSource(id: "zz"))
     }
 
     // MARK: - Activation (known apps)
