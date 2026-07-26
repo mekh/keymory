@@ -86,7 +86,7 @@ Set it once by just *using* your Mac the way you already do. From then on, the r
 ## 🖱️ Everything, one click away
 
 <p align="center">
-  <img src="docs/menu.svg" alt="Keymory menu" width="480">
+  <img src="docs/menu.png" alt="Keymory menu" width="480">
 </p>
 
 | Menu item | What it does |
