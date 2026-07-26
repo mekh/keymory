@@ -305,8 +305,12 @@ test-target configs stay identical across branches.
 
 - App icon (K + memory-loop mark) generated natively via CoreGraphics; iconset in
   `Keymory/Assets.xcassets/AppIcon.appiconset/`.
-- Marketing SVGs in `docs/` (hero, menu, how-it-works, flags). App Store screenshots
-  (2560×1600) in `docs/appstore/` — 3 SVG posters + 3 real-UI captures.
+- Marketing SVGs in `docs/` (hero, how-it-works, flags; `-apple-system` font stack) plus a
+  real menu screenshot `docs/menu.png` (trimmed from the current menu, rounded corners). App
+  Store posters (2560×1600 PNG, sRGB, no alpha) in `docs/appstore/` (**untracked — not
+  committed**): `poster1..5`, each a real dark-mode menu capture composited on the branded
+  gradient with an SF Pro headline rendered via `NSFont.systemFont`; posters 2/3/4 show the
+  current menu.
 - Privacy policy: `PRIVACY.md` → `https://github.com/mekh/keymory/blob/main/PRIVACY.md`
   (no data collected).
 
