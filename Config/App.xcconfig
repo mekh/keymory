@@ -10,7 +10,7 @@
 
 // Release versioning. Bumped every release; editing this line no longer
 // touches the shared project file.
-CURRENT_PROJECT_VERSION = 1
+CURRENT_PROJECT_VERSION = 4
 MARKETING_VERSION = 1.1
 
 // Code signing. The App Store distribution team (shared-core / pop-up builds).
